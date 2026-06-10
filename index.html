@@ -226,8 +226,8 @@
 /* ===== CREDENCIAIS FIXAS — preencha as duas linhas abaixo =====
    Supabase → Project Settings → API. Deixe entre as aspas.
    Preenchido: pula a tela de setup e abre direto no login. */
-const SB_URL = "https://lknlxlzqkhwhplsgcftj.supabase.co"; 
-const SB_KEY = "sb_publishable_BK6FWaG0sJ2eMeRN5W8uxA_5QRXRF1f"; 
+const SB_URL = "";   // ex.: "https://abcd1234.supabase.co"
+const SB_KEY = "";   // ex.: "eyJhbGci..."  (anon public)
 /* ============================================================== */
 
 let sb=null, USER=null, CFG=null;
@@ -843,9 +843,15 @@ async function runImport(){
       return o;
     }).filter(o=>o.nome);
     if(!rows.length)return toast('Nenhuma linha válida.',true);
-    const {error}=await sb.from('alunos').upsert(rows,{onConflict:'chave_import',ignoreDuplicates:false});
+    // dedup por chave_import (mantém a última ocorrência) — evita erro ON CONFLICT
+    const dedup={}; rows.forEach(o=>dedup[o.chave_import]=o);
+    const finais=Object.values(dedup);
+    const dups=rows.length-finais.length;
+    const {error}=await sb.from('alunos').upsert(finais,{onConflict:'chave_import',ignoreDuplicates:false});
     if(error)return toast(error.message,true);
-    await loadAll(); toast(`${rows.length} alunos importados.`); go('alunos'); return;
+    await loadAll();
+    toast(`${finais.length} alunos importados${dups?` · ${dups} duplicata(s) unificada(s)`:''}.`);
+    go('alunos'); return;
   }
   // lançamentos
   const catMens=S.categorias.find(c=>c.nome==='Mensalidade'&&c.tipo==='entrada');
