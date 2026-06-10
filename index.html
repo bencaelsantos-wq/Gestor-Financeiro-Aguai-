@@ -195,7 +195,7 @@
     <div class="field"><label>Senha</label><input id="logPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="btn full" id="loginBtn" onclick="doLogin()">Entrar</button>
     <div class="err" id="loginErr"></div>
-    <button class="btn ghost sm" style="margin-top:14px" onclick="forgetConfig()">Trocar projeto Supabase</button>
+    <button class="btn ghost sm" id="btnTrocar" style="margin-top:14px" onclick="forgetConfig()">Trocar projeto Supabase</button>
   </div>
 </div>
 
@@ -223,6 +223,13 @@
 /* ===================================================================
    ESTADO / CLIENTE
 =================================================================== */
+/* ===== CREDENCIAIS FIXAS — preencha as duas linhas abaixo =====
+   Supabase → Project Settings → API. Deixe entre as aspas.
+   Preenchido: pula a tela de setup e abre direto no login. */
+const SB_URL = "";   // ex.: "https://abcd1234.supabase.co"
+const SB_KEY = "";   // ex.: "eyJhbGci..."  (anon public)
+/* ============================================================== */
+
 let sb=null, USER=null, CFG=null;
 const S={ config:null, planos:[], categorias:[], alunos:[], lancamentos:[] };
 const $=id=>document.getElementById(id);
@@ -255,8 +262,12 @@ function toast(msg,bad){ const t=$('toast'); t.textContent=msg; t.className='toa
    BOOT
 =================================================================== */
 (function boot(){
+  // 1) credenciais fixas no código têm prioridade → vai direto ao login
+  if(SB_URL && SB_KEY){ initClient(SB_URL,SB_KEY); checkSession(); return; }
+  // 2) senão, usa o que estiver salvo no navegador
   const url=localStorage.getItem(LS.url), key=localStorage.getItem(LS.key);
   if(url&&key){ initClient(url,key); checkSession(); }
+  // 3) senão, mostra a tela de conectar
   else $('gateSetup').style.display='grid';
 })();
 
@@ -272,6 +283,7 @@ function saveConfig(){
 function forgetConfig(){ localStorage.removeItem(LS.url); localStorage.removeItem(LS.key); location.reload(); }
 
 async function checkSession(){
+  if(SB_URL && SB_KEY){ const b=$('btnTrocar'); if(b)b.style.display='none'; }
   const { data } = await sb.auth.getSession();
   if(data.session){ USER=data.session.user; enterApp(); }
   else { $('gateLogin').style.display='grid'; }
