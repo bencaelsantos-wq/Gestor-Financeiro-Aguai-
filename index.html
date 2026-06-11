@@ -262,6 +262,16 @@ function toast(msg,bad){ const t=$('toast'); t.textContent=msg; t.className='toa
    BOOT
 =================================================================== */
 (function boot(){
+  console.log('Financeiro Aguai · build v3 · boot iniciado');
+  // 0) a biblioteca do Supabase precisa ter carregado (CDN)
+  if(typeof supabase==='undefined' || !supabase.createClient){
+    document.body.innerHTML='<div style="padding:40px;font-family:sans-serif;max-width:520px;margin:40px auto;color:#2B2722">'+
+      '<h2 style="font-family:Georgia,serif">Não consegui carregar a biblioteca do Supabase</h2>'+
+      '<p>Isso costuma ser internet instável ou um bloqueador (AdBlock/firewall) barrando o CDN. '+
+      'Tente recarregar a página, desativar bloqueadores neste site, ou testar em outra rede.</p></div>';
+    console.error('supabase global não disponível — CDN não carregou');
+    return;
+  }
   // 1) credenciais fixas no código têm prioridade → vai direto ao login
   if(SB_URL && SB_KEY){ initClient(SB_URL,SB_KEY); checkSession(); return; }
   // 2) senão, usa o que estiver salvo no navegador
@@ -271,7 +281,10 @@ function toast(msg,bad){ const t=$('toast'); t.textContent=msg; t.className='toa
   else $('gateSetup').style.display='grid';
 })();
 
-function initClient(url,key){ sb=supabase.createClient(url,key); CFG={url,key}; }
+function initClient(url,key){
+  try{ sb=supabase.createClient(url,key); CFG={url,key}; }
+  catch(e){ console.error('Erro ao criar cliente Supabase:',e); alert('Erro ao iniciar Supabase: '+e.message); }
+}
 
 function saveConfig(){
   const url=$('cfgUrl').value.trim().replace(/\/$/,''), key=$('cfgKey').value.trim();
@@ -284,9 +297,16 @@ function forgetConfig(){ localStorage.removeItem(LS.url); localStorage.removeIte
 
 async function checkSession(){
   if(SB_URL && SB_KEY){ const b=$('btnTrocar'); if(b)b.style.display='none'; }
-  const { data } = await sb.auth.getSession();
-  if(data.session){ USER=data.session.user; enterApp(); }
-  else { $('gateLogin').style.display='grid'; }
+  try{
+    const { data, error } = await sb.auth.getSession();
+    if(error) console.error('getSession retornou erro:',error);
+    if(data && data.session){ USER=data.session.user; enterApp(); return; }
+  }catch(e){
+    console.error('Falha em getSession (mostrando login mesmo assim):',e);
+  }
+  // sem sessão (ou falha) → SEMPRE mostra o login, nunca tela branca
+  $('gateLogin').style.display='grid';
+  console.log('Tela de login exibida');
 }
 async function doLogin(){
   const email=$('logEmail').value.trim(), password=$('logPass').value;
