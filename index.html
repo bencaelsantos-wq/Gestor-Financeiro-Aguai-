@@ -476,12 +476,13 @@ function renderAlunos(){
       <div class="filters"><input class="search" placeholder="Buscar por aluno ou responsável..."
         oninput="alunoFiltro=this.value.toLowerCase();renderAlunos()" value="${esc(alunoFiltro)}">
         <span style="font-size:13px;color:var(--ink-soft)">${list.length} de ${S.alunos.length}</span></div>
-      ${list.length?`<table><thead><tr><th>Aluno</th><th>Período</th><th>Plano</th><th>Responsável</th><th>Status</th><th></th></tr></thead>
+      ${list.length?`<table><thead><tr><th>Aluno</th><th>Segmento / Ano</th><th>Período</th><th>Contato</th><th>Plano</th><th>Status</th><th></th></tr></thead>
       <tbody>${list.map(a=>{const p=planoDe(a);return `<tr>
-        <td><strong>${esc(a.nome)}</strong>${a.turma?`<div style="font-size:12px;color:var(--ink-soft)">${esc(a.turma)}</div>`:''}</td>
+        <td><strong>${esc(a.nome)}</strong>${a.ra?`<div style="font-size:12px;color:var(--ink-soft)">RA ${esc(a.ra)}</div>`:''}</td>
+        <td>${esc(a.segmento||'—')}${a.ano_serie?` · ${esc(a.ano_serie)}`:''}</td>
         <td>${esc(a.periodo||'—')}</td>
+        <td>${esc(a.mae_telefone||a.resp_telefone||'—')}${a.mae_nome?`<div style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_nome)}</div>`:''}</td>
         <td>${p?esc(p.nome)+' · '+fmtBRL(p.valor_mensalidade):'—'}</td>
-        <td>${esc(a.resp_nome||'—')}${a.resp_telefone?`<div style="font-size:12px;color:var(--ink-soft)">${esc(a.resp_telefone)}</div>`:''}</td>
         <td><span class="badge ${a.status==='ativo'?'ok':'muted'}">${a.status}</span></td>
         <td><div class="row-acts"><button class="icon-btn" onclick="modalAluno('${a.id}')">Editar</button></div></td>
       </tr>`;}).join('')}</tbody></table>`
@@ -491,22 +492,73 @@ function renderAlunos(){
 function modalAluno(id){
   const a=id?S.alunos.find(x=>x.id===id):{};
   const planoOpts=S.planos.map(p=>`<option value="${p.id}" ${a.plano_id===p.id?'selected':''}>${esc(p.nome)} (${fmtBRL(p.valor_mensalidade)})</option>`).join('');
+  const F=(k,lbl,type='text',span=false)=>`<div class="field"${span?' style="grid-column:1/3"':''}><label>${lbl}</label><input id="a_${k}" type="${type}" value="${esc(a[k]==null?'':a[k])}"></div>`;
+  const sec=t=>`<div class="sec-title" style="grid-column:1/3">${t}</div>`;
+  const docSel=(k,lbl)=>{const v=(a[k]||'').toLowerCase();const opts=['','ok','pendente','enviada','incompleta','NOK','Não enviada'];
+    return `<div class="field"><label>${lbl}</label><select id="a_${k}">${opts.map(o=>`<option value="${o}" ${(a[k]||'')===o||v===o.toLowerCase()?'selected':''}>${o||'—'}</option>`).join('')}</select></div>`;};
   openModal(id?'Editar aluno':'Novo aluno',`
     <div class="grid2">
+      ${sec('Dados do aluno')}
       <div class="field" style="grid-column:1/3"><label>Nome do aluno *</label><input id="a_nome" value="${esc(a.nome||'')}"></div>
-      <div class="field"><label>Data de nascimento</label><input id="a_nasc" type="date" value="${a.data_nascimento||''}"></div>
-      <div class="field"><label>Ambiente / turma</label><input id="a_turma" value="${esc(a.turma||'')}" placeholder="Infantil II"></div>
-      <div class="field"><label>Período</label><select id="a_periodo">
-        <option value="">—</option>
-        ${['meio','estendido','integral'].map(p=>`<option ${a.periodo===p?'selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="field"><label>Status</label><select id="a_status">${['ativo','inativo','trancado'].map(s=>`<option ${a.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="field"><label>Sexo</label><select id="a_sexo"><option value="">—</option>${['Fem','Masc'].map(s=>`<option ${a.sexo===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      ${F('data_nascimento','Nascimento','date')}
+      ${F('ra','RA')}
+      ${F('cpf','CPF do aluno')}
+      ${F('email_escolar','E-mail escolar','email')}
+
+      ${sec('Acadêmico')}
+      <div class="field"><label>Segmento</label><select id="a_segmento"><option value="">—</option>${['Educação Infantil','Fundamental I','Fundamental II','Ensino Médio'].map(s=>`<option ${a.segmento===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      ${F('ano_serie','Ano / Série')}
+      ${F('periodo','Período')}
+      ${F('horario','Horário')}
+      ${F('agrupada','Turma agrupada')}
+      ${F('extracurricular','Extracurricular')}
+
+      ${sec('Financeiro')}
       <div class="field"><label>Plano</label><select id="a_plano"><option value="">—</option>${planoOpts}</select></div>
-      <div class="field"><label>Status</label><select id="a_status">
-        ${['ativo','inativo','trancado'].map(s=>`<option ${a.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
       <div class="field"><label>Dia de vencimento</label><input id="a_dia" type="number" min="1" max="28" value="${a.dia_vencimento||''}" placeholder="${S.config.dia_vencimento}"></div>
-      <div class="field" style="grid-column:1/3"><label>Responsável financeiro</label><input id="a_resp" value="${esc(a.resp_nome||'')}"></div>
-      <div class="field"><label>CPF do responsável</label><input id="a_cpf" value="${esc(a.resp_cpf||'')}"></div>
-      <div class="field"><label>Telefone</label><input id="a_tel" value="${esc(a.resp_telefone||'')}"></div>
-      <div class="field" style="grid-column:1/3"><label>E-mail</label><input id="a_email" type="email" value="${esc(a.resp_email||'')}"></div>
+
+      ${sec('Endereço')}
+      <div class="field" style="grid-column:1/3"><label>Logradouro</label><input id="a_logradouro" value="${esc(a.logradouro||'')}"></div>
+      ${F('numero','Número')}
+      ${F('bairro','Bairro')}
+      ${F('cidade','Cidade')}
+      ${F('estado','Estado')}
+      ${F('cep','CEP')}
+
+      ${sec('Mãe / responsável')}
+      <div class="field" style="grid-column:1/3"><label>Nome</label><input id="a_mae_nome" value="${esc(a.mae_nome||'')}"></div>
+      ${F('mae_telefone','Telefone')}
+      ${F('mae_email','E-mail','email')}
+
+      ${sec('Pai / responsável')}
+      <div class="field" style="grid-column:1/3"><label>Nome</label><input id="a_pai_nome" value="${esc(a.pai_nome||'')}"></div>
+      ${F('pai_telefone','Telefone')}
+      ${F('pai_email','E-mail','email')}
+
+      ${sec('Responsável financeiro (quem paga)')}
+      <div class="field" style="grid-column:1/3"><label>Nome</label><input id="a_resp_nome" value="${esc(a.resp_nome||'')}"></div>
+      ${F('resp_cpf','CPF')}
+      ${F('resp_telefone','Telefone')}
+      <div class="field" style="grid-column:1/3"><label>E-mail</label><input id="a_resp_email" type="email" value="${esc(a.resp_email||'')}"></div>
+
+      ${sec('Matrícula')}
+      ${F('data_matricula','Data de matrícula','date')}
+      ${F('como_conheceu','Como conheceu')}
+      ${F('escola_anterior','Escola anterior',undefined,true)}
+
+      ${sec('Inclusão')}
+      ${F('diagnostico','Diagnóstico')}
+      ${F('laudo','Laudo (sim/não)')}
+      <div class="field" style="grid-column:1/3"><label>Observações de inclusão</label><input id="a_inclusao_obs" value="${esc(a.inclusao_obs||'')}"></div>
+
+      ${sec('Documentação')}
+      ${docSel('doc_ficha','Ficha cadastral')}
+      ${docSel('doc_drive','Doc. Drive')}
+      ${docSel('doc_contrato','Contrato')}
+      ${docSel('doc_dir_imagem','Direito de imagem')}
+      ${docSel('doc_sec_digital','Secretaria digital')}
     </div>`,
     `${id?`<button class="btn ghost" onclick="delAluno('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
@@ -514,10 +566,22 @@ function modalAluno(id){
 }
 async function saveAluno(id){
   const nome=$('a_nome').value.trim(); if(!nome)return toast('Informe o nome.',true);
-  const rec={ nome, data_nascimento:$('a_nasc').value||null, turma:$('a_turma').value.trim()||null,
-    periodo:$('a_periodo').value||null, plano_id:$('a_plano').value||null, status:$('a_status').value,
-    dia_vencimento:$('a_dia').value?+$('a_dia').value:null, resp_nome:$('a_resp').value.trim()||null,
-    resp_cpf:$('a_cpf').value.trim()||null, resp_telefone:$('a_tel').value.trim()||null, resp_email:$('a_email').value.trim()||null };
+  const v=k=>{const el=$('a_'+k);return el?(el.value.trim?el.value.trim():el.value)||null:null;};
+  const rec={ nome, status:$('a_status').value, sexo:v('sexo'),
+    data_nascimento:$('a_data_nascimento').value||null,
+    ra:v('ra'), cpf:v('cpf'), email_escolar:v('email_escolar'),
+    segmento:v('segmento'), ano_serie:v('ano_serie'), periodo:v('periodo'),
+    horario:v('horario'), agrupada:v('agrupada'), extracurricular:v('extracurricular'),
+    plano_id:$('a_plano').value||null, dia_vencimento:$('a_dia').value?+$('a_dia').value:null,
+    logradouro:v('logradouro'), numero:v('numero'), bairro:v('bairro'),
+    cidade:v('cidade'), estado:v('estado'), cep:v('cep'),
+    mae_nome:v('mae_nome'), mae_telefone:v('mae_telefone'), mae_email:v('mae_email'),
+    pai_nome:v('pai_nome'), pai_telefone:v('pai_telefone'), pai_email:v('pai_email'),
+    resp_nome:v('resp_nome'), resp_cpf:v('resp_cpf'), resp_telefone:v('resp_telefone'), resp_email:v('resp_email'),
+    data_matricula:$('a_data_matricula').value||null, como_conheceu:v('como_conheceu'), escola_anterior:v('escola_anterior'),
+    diagnostico:v('diagnostico'), laudo:v('laudo'), inclusao_obs:v('inclusao_obs'),
+    doc_ficha:v('doc_ficha'), doc_drive:v('doc_drive'), doc_contrato:v('doc_contrato'),
+    doc_dir_imagem:v('doc_dir_imagem'), doc_sec_digital:v('doc_sec_digital') };
   const q=id?sb.from('alunos').update(rec).eq('id',id):sb.from('alunos').insert(rec);
   const {error}=await q; if(error)return toast(error.message,true);
   closeModal(); await loadAll(); renderAlunos(); toast('Aluno salvo.');
@@ -751,15 +815,27 @@ function renderInadimp(){
 const IMPORT_TARGETS={
   alunos:[
     {k:'nome',label:'Nome do aluno',req:true},
-    {k:'resp_nome',label:'Responsável'},
-    {k:'resp_cpf',label:'CPF do responsável'},
-    {k:'resp_telefone',label:'Telefone'},
-    {k:'resp_email',label:'E-mail'},
-    {k:'turma',label:'Turma / ambiente'},
-    {k:'periodo',label:'Período (meio/estendido/integral)'},
-    {k:'data_nascimento',label:'Data de nascimento'},
-    {k:'data_matricula',label:'Data de matrícula'},
     {k:'status',label:'Status (ativo/inativo)'},
+    {k:'segmento',label:'Ensino / Segmento'},
+    {k:'ano_serie',label:'Ano / Série'},
+    {k:'periodo',label:'Período'},
+    {k:'data_nascimento',label:'Nascimento'},
+    {k:'ra',label:'RA'},
+    {k:'mae_telefone',label:'Tel. Mãe'},
+    {k:'mae_email',label:'Email Mãe'},
+    {k:'bairro',label:'Bairro'},
+    {k:'cidade',label:'Cidade'},
+    {k:'doc_ficha',label:'Ficha'},
+    {k:'doc_drive',label:'Drive'},
+    {k:'doc_contrato',label:'Contrato'},
+    {k:'doc_dir_imagem',label:'Dir. Imagem'},
+    {k:'mae_nome',label:'Nome da Mãe'},
+    {k:'pai_nome',label:'Nome do Pai'},
+    {k:'pai_telefone',label:'Tel. Pai'},
+    {k:'resp_cpf',label:'CPF do responsável'},
+    {k:'data_matricula',label:'Data de matrícula'},
+    {k:'como_conheceu',label:'Como conheceu'},
+    {k:'diagnostico',label:'Diagnóstico / Inclusão'},
   ],
   lancamentos:[
     {k:'aluno_nome',label:'Aluno (nome p/ vincular)'},
@@ -848,18 +924,22 @@ function renderPreview(){
 async function runImport(){
   const m=IMP.map;
   if(IMP.type==='alunos'){
+    const txt=k=>m[k]?(String(r[m[k]]||'').trim()||null):undefined;
     const rows=IMP.rows.map(r=>{
+      const g=k=>m[k]?(String(r[m[k]]||'').trim()||null):null;
       const o={ nome:String(r[m.nome]||'').trim() };
-      if(m.resp_nome)o.resp_nome=String(r[m.resp_nome]||'').trim()||null;
-      if(m.resp_cpf)o.resp_cpf=String(r[m.resp_cpf]||'').trim()||null;
-      if(m.resp_telefone)o.resp_telefone=String(r[m.resp_telefone]||'').trim()||null;
-      if(m.resp_email)o.resp_email=String(r[m.resp_email]||'').trim()||null;
-      if(m.turma)o.turma=String(r[m.turma]||'').trim()||null;
-      if(m.periodo)o.periodo=String(r[m.periodo]||'').toLowerCase().trim()||null;
+      // texto simples
+      ['segmento','ano_serie','periodo','ra','bairro','cidade','mae_nome','mae_telefone',
+       'mae_email','pai_nome','pai_telefone','resp_cpf','como_conheceu','diagnostico',
+       'doc_ficha','doc_drive','doc_contrato','doc_dir_imagem']
+        .forEach(k=>{ if(m[k]) o[k]=g(k); });
+      // datas
       if(m.data_nascimento)o.data_nascimento=parseDateCell(r[m.data_nascimento]);
       if(m.data_matricula)o.data_matricula=parseDateCell(r[m.data_matricula]);
+      // status normalizado
       if(m.status){const s=String(r[m.status]||'').toLowerCase();o.status=s.includes('inativ')?'inativo':(s.includes('tranc')?'trancado':'ativo');}
-      o.chave_import=(o.resp_cpf||'')+'|'+o.nome.toLowerCase();
+      // chave de dedupe: CPF resp, senão nome+nascimento (separa xarás)
+      o.chave_import=(o.resp_cpf||'')+'|'+o.nome.toLowerCase()+'|'+(o.data_nascimento||'');
       return o;
     }).filter(o=>o.nome);
     if(!rows.length)return toast('Nenhuma linha válida.',true);
