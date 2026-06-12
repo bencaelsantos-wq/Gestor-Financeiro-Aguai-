@@ -231,7 +231,7 @@
 /* ============================================================== */
 
 let sb=null, USER=null, CFG=null;
-const S={ config:null, planos:[], categorias:[], alunos:[], lancamentos:[] };
+const S={ config:null, planos:[], categorias:[], alunos:[], lancamentos:[], cobrancas:[], funcionarios:[], despesasFixas:[] };
 const $=id=>document.getElementById(id);
 const LS={ url:'aguai_sb_url', key:'aguai_sb_key' };
 
@@ -327,7 +327,9 @@ const TABS=[
   {id:'painel',   label:'Painel',        ic:'◰'},
   {id:'alunos',   label:'Alunos',        ic:'❑'},
   {id:'cobrancas',label:'Cobranças',     ic:'❒'},
+  {id:'faturas',  label:'Faturas / envio',ic:'✉'},
   {id:'caixa',    label:'Fluxo de caixa',ic:'⇅'},
+  {id:'despesas', label:'Despesas',      ic:'⊟'},
   {id:'inadimp',  label:'Inadimplência', ic:'⚠'},
   {id:'importar', label:'Importar',      ic:'⇪'},
   {id:'config',   label:'Configurações', ic:'⚙'},
@@ -348,16 +350,20 @@ function go(tab){ TAB=tab;
 
 async function loadAll(){
   try{
-    const [cfg,planos,cats,alunos,lanc]=await Promise.all([
+    const [cfg,planos,cats,alunos,lanc,cobr,func,despf]=await Promise.all([
       sb.from('escola_config').select('*').eq('id',1).single(),
       sb.from('planos').select('*').order('valor_mensalidade'),
       sb.from('categorias').select('*').order('tipo'),
       sb.from('alunos').select('*').order('nome'),
       sb.from('lancamentos').select('*').order('vencimento',{ascending:false}).limit(5000),
+      sb.from('aluno_cobrancas').select('*'),
+      sb.from('funcionarios').select('*').order('nome'),
+      sb.from('despesas_fixas').select('*').order('descricao'),
     ]);
     S.config=cfg.data||{multa_percent:2,juros_mes_percent:1,dia_vencimento:10};
     S.planos=planos.data||[]; S.categorias=cats.data||[];
     S.alunos=alunos.data||[]; S.lancamentos=lanc.data||[];
+    S.cobrancas=cobr.data||[]; S.funcionarios=func.data||[]; S.despesasFixas=despf.data||[];
     if(lanc.error) throw lanc.error;
   }catch(e){ toast('Erro ao carregar: '+(e.message||e),true); console.error(e); }
 }
@@ -390,8 +396,8 @@ function encargos(l){
 /* ===================================================================
    RENDER ROUTER
 =================================================================== */
-function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCobrancas,
-  caixa:renderCaixa,inadimp:renderInadimp,importar:renderImportar,config:renderConfig}[TAB])(); }
+function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCobrancas,faturas:renderFaturas,
+  caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -484,7 +490,7 @@ function renderAlunos(){
         <td>${esc(a.mae_telefone||a.resp_telefone||'—')}${a.mae_nome?`<div style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_nome)}</div>`:''}</td>
         <td>${p?esc(p.nome)+' · '+fmtBRL(p.valor_mensalidade):'—'}</td>
         <td><span class="badge ${a.status==='ativo'?'ok':'muted'}">${a.status}</span></td>
-        <td><div class="row-acts"><button class="icon-btn" onclick="modalAluno('${a.id}')">Editar</button></div></td>
+        <td><div class="row-acts"><button class="icon-btn pay" onclick="modalCobrancas('${a.id}')">Cobranças</button><button class="icon-btn" onclick="modalAluno('${a.id}')">Editar</button></div></td>
       </tr>`;}).join('')}</tbody></table>`
       :`<div class="empty"><div class="big">❑</div>Nenhum aluno ainda. <a href="#" onclick="go('importar');return false">Importe sua planilha</a> ou cadastre manualmente.</div>`}
     </div>`;
@@ -493,6 +499,7 @@ function modalAluno(id){
   const a=id?S.alunos.find(x=>x.id===id):{};
   const planoOpts=S.planos.map(p=>`<option value="${p.id}" ${a.plano_id===p.id?'selected':''}>${esc(p.nome)} (${fmtBRL(p.valor_mensalidade)})</option>`).join('');
   const F=(k,lbl,type='text',span=false)=>`<div class="field"${span?' style="grid-column:1/3"':''}><label>${lbl}</label><input id="a_${k}" type="${type}" value="${esc(a[k]==null?'':a[k])}"></div>`;
+  const Ftel=(k,lbl)=>`<div class="field"><label>${lbl}</label><input id="a_${k}" value="${esc(a[k]||'')}"><small style="font-size:11px;color:var(--ink-soft);margin-top:3px;display:block">Inclua o DDD. O sistema completa o +55 sozinho para o WhatsApp.</small></div>`;
   const sec=t=>`<div class="sec-title" style="grid-column:1/3">${t}</div>`;
   const docSel=(k,lbl)=>{const v=(a[k]||'').toLowerCase();const opts=['','ok','pendente','enviada','incompleta','NOK','Não enviada'];
     return `<div class="field"><label>${lbl}</label><select id="a_${k}">${opts.map(o=>`<option value="${o}" ${(a[k]||'')===o||v===o.toLowerCase()?'selected':''}>${o||'—'}</option>`).join('')}</select></div>`;};
@@ -529,18 +536,18 @@ function modalAluno(id){
 
       ${sec('Mãe / responsável')}
       <div class="field" style="grid-column:1/3"><label>Nome</label><input id="a_mae_nome" value="${esc(a.mae_nome||'')}"></div>
-      ${F('mae_telefone','Telefone')}
+      ${Ftel('mae_telefone','Telefone')}
       ${F('mae_email','E-mail','email')}
 
       ${sec('Pai / responsável')}
       <div class="field" style="grid-column:1/3"><label>Nome</label><input id="a_pai_nome" value="${esc(a.pai_nome||'')}"></div>
-      ${F('pai_telefone','Telefone')}
+      ${Ftel('pai_telefone','Telefone')}
       ${F('pai_email','E-mail','email')}
 
       ${sec('Responsável financeiro (quem paga)')}
       <div class="field" style="grid-column:1/3"><label>Nome</label><input id="a_resp_nome" value="${esc(a.resp_nome||'')}"></div>
       ${F('resp_cpf','CPF')}
-      ${F('resp_telefone','Telefone')}
+      ${Ftel('resp_telefone','Telefone')}
       <div class="field" style="grid-column:1/3"><label>E-mail</label><input id="a_resp_email" type="email" value="${esc(a.resp_email||'')}"></div>
 
       ${sec('Matrícula')}
@@ -632,37 +639,124 @@ function abrirGerar(){
   const comp=monthStart();
   const ativos=S.alunos.filter(a=>a.status==='ativo'&&a.plano_id);
   const semPlano=S.alunos.filter(a=>a.status==='ativo'&&!a.plano_id).length;
-  openModal('Gerar mensalidades',`
-    <p class="hint" style="margin-top:0">Cria uma parcela de mensalidade para cada aluno ativo com plano. Não duplica se já existir na competência.</p>
+  const cobrRec=S.cobrancas.filter(c=>c.recorrente&&c.ativo&&S.alunos.find(a=>a.id===c.aluno_id&&a.status==='ativo')).length;
+  openModal('Gerar cobranças do mês',`
+    <p class="hint" style="margin-top:0">Gera, para cada aluno ativo, a mensalidade do plano <b>e</b> cada cobrança extra recorrente (alimentação, extracurricular...) em <b>linhas separadas e detalhadas</b>, conforme a Lei 9.870/99. Não duplica o que já existir na competência.</p>
     <div class="field"><label>Competência (mês de referência)</label><input id="g_comp" type="month" value="${comp.slice(0,7)}"></div>
     <div class="field"><label>Dia de vencimento padrão</label><input id="g_dia" type="number" min="1" max="28" value="${S.config.dia_vencimento}"></div>
     <div style="background:var(--surface-2);border-radius:9px;padding:14px;margin-top:6px;font-size:13px">
-      <b>${ativos.length}</b> alunos ativos com plano serão cobrados.
-      ${semPlano?`<div style="color:var(--clay);margin-top:6px">${semPlano} aluno(s) ativo(s) sem plano serão ignorados.</div>`:''}
+      <b>${ativos.length}</b> mensalidades + <b>${cobrRec}</b> cobranças extras recorrentes serão geradas.
+      ${semPlano?`<div style="color:var(--clay);margin-top:6px">${semPlano} aluno(s) ativo(s) sem plano: só as cobranças extras serão geradas.</div>`:''}
     </div>`,
     `<button class="btn ghost" onclick="closeModal()">Cancelar</button>
-     <button class="btn" onclick="gerarMensalidades()">Gerar ${ativos.length} parcelas</button>`);
+     <button class="btn" onclick="gerarMensalidades()">Gerar cobranças</button>`);
 }
 async function gerarMensalidades(){
   const mes=$('g_comp').value; if(!mes)return toast('Escolha a competência.',true);
   const comp=mes+'-01'; const diaPad=+$('g_dia').value||S.config.dia_vencimento;
   const catMens=S.categorias.find(c=>c.nome==='Mensalidade'&&c.tipo==='entrada');
-  const ativos=S.alunos.filter(a=>a.status==='ativo'&&a.plano_id);
+  const ativos=S.alunos.filter(a=>a.status==='ativo');
   const rows=[];
   for(const a of ativos){
-    const p=planoDe(a); if(!p||!p.valor_mensalidade)continue;
-    let valor=Number(p.valor_mensalidade);
-    // descontos (carregados sob demanda não — simplificado: aplica nenhum aqui; ver observação)
     const dia=a.dia_vencimento||diaPad;
     const venc=`${mes}-${String(dia).padStart(2,'0')}`;
-    rows.push({ tipo:'entrada', aluno_id:a.id, categoria_id:catMens?catMens.id:null,
-      descricao:`Mensalidade ${compLabel(comp)} · ${p.nome}`, competencia:comp, vencimento:venc,
-      valor, status:'pendente', origem:'gerado', chave_unica:`mens:${a.id}:${comp}` });
+    // mensalidade do plano
+    const p=planoDe(a);
+    if(p&&p.valor_mensalidade){
+      rows.push({ tipo:'entrada', aluno_id:a.id, categoria_id:catMens?catMens.id:null,
+        descricao:`Mensalidade ${compLabel(comp)} · ${p.nome}`, competencia:comp, vencimento:venc,
+        valor:Number(p.valor_mensalidade), status:'pendente', origem:'gerado', chave_unica:`mens:${a.id}:${comp}` });
+    }
+    // cobranças extras recorrentes — uma linha por cobrança (detalhamento)
+    S.cobrancas.filter(c=>c.aluno_id===a.id&&c.recorrente&&c.ativo&&c.valor).forEach(c=>{
+      const cdia=c.dia_vencimento||dia;
+      rows.push({ tipo:'entrada', aluno_id:a.id, categoria_id:c.categoria_id||null,
+        descricao:`${c.descricao} · ${compLabel(comp)}`, competencia:comp,
+        vencimento:`${mes}-${String(cdia).padStart(2,'0')}`, valor:Number(c.valor),
+        status:'pendente', origem:'gerado', chave_unica:`cob:${c.id}:${comp}` });
+    });
   }
-  if(!rows.length){ closeModal(); return toast('Nenhuma parcela a gerar.',true); }
-  const {error,count}=await sb.from('lancamentos').upsert(rows,{onConflict:'chave_unica',ignoreDuplicates:true,count:'exact'});
+  if(!rows.length){ closeModal(); return toast('Nada a gerar.',true); }
+  const {error}=await sb.from('lancamentos').upsert(rows,{onConflict:'chave_unica',ignoreDuplicates:true});
   if(error)return toast(error.message,true);
-  closeModal(); await loadAll(); render(); toast(`Mensalidades geradas (${rows.length} processadas).`);
+  closeModal(); await loadAll(); render(); toast(`${rows.length} cobranças processadas.`);
+}
+
+/* ---- Cobranças extras por aluno ---- */
+function catsByTipo(tipo){ return S.categorias.filter(c=>c.tipo===tipo); }
+function modalCobrancas(alunoId){
+  const a=S.alunos.find(x=>x.id===alunoId); if(!a)return;
+  const lista=S.cobrancas.filter(c=>c.aluno_id===alunoId);
+  const p=planoDe(a);
+  const totalRec=(p?Number(p.valor_mensalidade||0):0)+lista.filter(c=>c.recorrente&&c.ativo).reduce((s,c)=>s+Number(c.valor),0);
+  const catOpts=catsByTipo('entrada').map(c=>`<option value="${c.id}">${esc(c.nome)}</option>`).join('');
+  const linhas=lista.length?lista.map(c=>`<tr>
+      <td>${esc(c.descricao)}</td>
+      <td>${esc(catNome(c.categoria_id))}</td>
+      <td class="num">${fmtNum(c.valor)}</td>
+      <td>${c.recorrente?'<span class="badge in">mensal fixa</span>':'<span class="badge pend">avulsa</span>'}</td>
+      <td><div class="row-acts">
+        ${!c.recorrente?`<button class="icon-btn pay" onclick="lancarAvulsa('${c.id}')">Lançar</button>`:''}
+        <button class="icon-btn" onclick="delCobranca('${c.id}','${alunoId}')">×</button></div></td></tr>`).join('')
+    :`<tr><td colspan="5" class="empty">Nenhuma cobrança extra. Mensalidade vem do plano.</td></tr>`;
+  openModal('Cobranças · '+esc(a.nome),`
+    <div style="background:var(--surface-2);border-radius:9px;padding:12px 14px;margin-bottom:14px;font-size:13px">
+      Mensalidade do plano: <b>${p?fmtBRL(p.valor_mensalidade):'sem plano'}</b><br>
+      Total recorrente/mês (plano + extras fixas): <b class="mono">${fmtBRL(totalRec)}</b>
+    </div>
+    <table style="margin-bottom:14px"><thead><tr><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Tipo</th><th></th></tr></thead>
+      <tbody>${linhas}</tbody></table>
+    <div class="sec-title">Adicionar cobrança extra</div>
+    <div class="grid2">
+      <div class="field" style="grid-column:1/3"><label>Descrição</label><input id="cob_desc" placeholder="Ex: Alimentação, Inglês, Cantina"></div>
+      <div class="field"><label>Categoria</label><select id="cob_cat">${catOpts}</select></div>
+      <div class="field"><label>Valor</label><input id="cob_valor" class="mono" placeholder="0,00"></div>
+      <div class="field"><label>Tipo</label><select id="cob_rec">
+        <option value="true">Mensal fixa (gera todo mês)</option>
+        <option value="false">Avulsa / variável (lanço quando houver)</option></select></div>
+      <div class="field"><label>Dia de vencimento</label><input id="cob_dia" type="number" min="1" max="28" placeholder="${a.dia_vencimento||S.config.dia_vencimento}"></div>
+    </div>`,
+    `<button class="btn ghost" onclick="closeModal()">Fechar</button>
+     <button class="btn" onclick="saveCobranca('${alunoId}')">+ Adicionar</button>`);
+}
+async function saveCobranca(alunoId){
+  const desc=$('cob_desc').value.trim(); if(!desc)return toast('Informe a descrição.',true);
+  const rec={ aluno_id:alunoId, descricao:desc, categoria_id:$('cob_cat').value||null,
+    valor:parseMoneyBR($('cob_valor').value)||0, recorrente:$('cob_rec').value==='true',
+    dia_vencimento:$('cob_dia').value?+$('cob_dia').value:null };
+  const {error}=await sb.from('aluno_cobrancas').insert(rec);
+  if(error)return toast(error.message,true);
+  await loadAll(); modalCobrancas(alunoId); toast('Cobrança adicionada.');
+}
+async function delCobranca(id,alunoId){ if(!confirm('Remover esta cobrança? (lançamentos já gerados permanecem)'))return;
+  const {error}=await sb.from('aluno_cobrancas').delete().eq('id',id); if(error)return toast(error.message,true);
+  await loadAll(); modalCobrancas(alunoId); toast('Cobrança removida.'); }
+function lancarAvulsa(cobId){
+  const c=S.cobrancas.find(x=>x.id===cobId); if(!c)return;
+  const comp=monthStart(), mes=comp.slice(0,7);
+  const a=S.alunos.find(x=>x.id===c.aluno_id);
+  const dia=c.dia_vencimento||a.dia_vencimento||S.config.dia_vencimento;
+  openModal('Lançar cobrança avulsa',`
+    <p class="hint" style="margin-top:0">${esc(c.descricao)} — ${esc(alunoNome(c.aluno_id))}. Ajuste o valor deste mês.</p>
+    <div class="grid2">
+      <div class="field"><label>Competência</label><input id="av_comp" type="month" value="${mes}"></div>
+      <div class="field"><label>Valor deste mês</label><input id="av_valor" class="mono" value="${c.valor?fmtNum(c.valor):''}"></div>
+      <div class="field" style="grid-column:1/3"><label>Vencimento</label><input id="av_venc" type="date" value="${mes}-${String(dia).padStart(2,'0')}"></div>
+    </div>`,
+    `<button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="confirmAvulsa('${cobId}')">Lançar</button>`);
+}
+async function confirmAvulsa(cobId){
+  const c=S.cobrancas.find(x=>x.id===cobId);
+  const mes=$('av_comp').value, valor=parseMoneyBR($('av_valor').value)||0;
+  if(!valor)return toast('Informe o valor.',true);
+  const rec={ tipo:'entrada', aluno_id:c.aluno_id, categoria_id:c.categoria_id||null,
+    descricao:`${c.descricao} · ${compLabel(mes+'-01')}`, competencia:mes+'-01',
+    vencimento:$('av_venc').value||null, valor, status:'pendente', origem:'manual',
+    chave_unica:`cob:${c.id}:${mes}-01` };
+  const {error}=await sb.from('lancamentos').upsert(rec,{onConflict:'chave_unica',ignoreDuplicates:true});
+  if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); render(); toast('Cobrança lançada.');
 }
 
 /* baixa de pagamento */
@@ -772,6 +866,245 @@ function renderCaixa(){
     </div>`;
 }
 function catNome(id){ const c=S.categorias.find(x=>x.id===id); return c?c.nome:'Sem categoria'; }
+
+/* ---------------- DESPESAS DA ESCOLA ---------------- */
+let despComp='';
+function renderDespesas(){
+  const mes=despComp?despComp+'-01':monthStart(), mesFim=addMonthsISO(mes,1);
+  const saidas=S.lancamentos.filter(l=>l.tipo==='saida');
+  const noMes=l=>l.competencia>=mes&&l.competencia<mesFim;
+  const pagasMes=saidas.filter(l=>l.status==='pago'&&l.data_pagamento>=mes&&l.data_pagamento<mesFim).reduce((s,l)=>s+Number(l.valor_pago||l.valor),0);
+  const pendMes=saidas.filter(l=>noMes(l)&&l.status==='pendente').reduce((s,l)=>s+Number(l.valor),0);
+  const folha=S.funcionarios.filter(f=>f.ativo).reduce((s,f)=>s+Number(f.salario),0);
+  const fixasTot=S.despesasFixas.filter(d=>d.ativo).reduce((s,d)=>s+Number(d.valor),0);
+  const lista=saidas.filter(noMes).sort((a,b)=>(b.vencimento||'').localeCompare(a.vencimento||''));
+
+  $('view').innerHTML=head('Contas e despesas da escola','Despesas',
+    `<input type="month" value="${mes.slice(0,7)}" onchange="despComp=this.value;renderDespesas()" style="padding:7px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface)">
+     <button class="btn ghost sm" onclick="abrirGerarDespesas()">Gerar do mês</button>
+     <button class="btn sm" onclick="modalLanc(null,'saida')">+ Despesa avulsa</button>`)
+  +`<div class="kpi-grid">
+      <div class="kpi accent"><div class="lbl">Pago no mês</div><div class="val mono">${fmtBRL(pagasMes)}</div></div>
+      <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--warn)"></span>A pagar no mês</div><div class="val mono">${fmtBRL(pendMes)}</div></div>
+      <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--clay)"></span>Folha mensal</div><div class="val mono">${fmtBRL(folha)}</div><div class="sub">${S.funcionarios.filter(f=>f.ativo).length} funcionários</div></div>
+      <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--sage)"></span>Contas fixas/mês</div><div class="val mono">${fmtBRL(fixasTot)}</div><div class="sub">${S.despesasFixas.filter(d=>d.ativo).length} contas</div></div>
+    </div>`
+  +`<div class="panel"><div class="panel-head"><h2>Funcionários · folha</h2><button class="btn sm" onclick="modalFuncionario()">+ Funcionário</button></div>
+      ${S.funcionarios.length?`<table><thead><tr><th>Nome</th><th>Cargo</th><th class="num">Salário</th><th>Pgto dia</th><th>Status</th><th></th></tr></thead>
+      <tbody>${S.funcionarios.map(f=>`<tr><td><strong>${esc(f.nome)}</strong></td><td>${esc(f.cargo||'—')}</td>
+        <td class="num">${fmtNum(f.salario)}</td><td>${f.dia_pagamento}</td>
+        <td><span class="badge ${f.ativo?'ok':'muted'}">${f.ativo?'ativo':'inativo'}</span></td>
+        <td><div class="row-acts"><button class="icon-btn" onclick="modalFuncionario('${f.id}')">Editar</button></div></td></tr>`).join('')}</tbody></table>`
+      :`<div class="empty">Nenhum funcionário cadastrado.</div>`}
+    </div>`
+  +`<div class="panel"><div class="panel-head"><h2>Contas fixas mensais</h2><button class="btn sm" onclick="modalDespFixa()">+ Conta fixa</button></div>
+      ${S.despesasFixas.length?`<table><thead><tr><th>Descrição</th><th>Categoria</th><th class="num">Valor base</th><th>Venc. dia</th><th>Status</th><th></th></tr></thead>
+      <tbody>${S.despesasFixas.map(d=>`<tr><td><strong>${esc(d.descricao)}</strong></td><td>${esc(catNome(d.categoria_id))}</td>
+        <td class="num">${fmtNum(d.valor)}</td><td>${d.dia_vencimento}</td>
+        <td><span class="badge ${d.ativo?'ok':'muted'}">${d.ativo?'ativa':'inativa'}</span></td>
+        <td><div class="row-acts"><button class="icon-btn" onclick="modalDespFixa('${d.id}')">Editar</button></div></td></tr>`).join('')}</tbody></table>`
+      :`<div class="empty">Nenhuma conta fixa (água, luz, internet, aluguel...).</div>`}
+    </div>`
+  +`<div class="panel"><div class="panel-head"><h2>Despesas da competência</h2><span style="font-size:13px;color:var(--ink-soft)">${compLabel(mes)}</span></div>
+      ${lista.length?`<table><thead><tr><th>Descrição</th><th>Categoria</th><th>Vencimento</th><th class="num">Valor</th><th>Status</th><th></th></tr></thead>
+      <tbody>${lista.map(l=>{const st=l.status==='pago'?'<span class="badge ok">pago</span>':(l.vencimento&&l.vencimento<todayISO()?'<span class="badge late">vencida</span>':'<span class="badge pend">a pagar</span>');return `<tr>
+        <td>${esc(l.descricao)}</td><td>${esc(catNome(l.categoria_id))}</td><td>${fmtDate(l.vencimento)}</td>
+        <td class="num">${fmtNum(l.valor)}</td><td>${st}</td>
+        <td><div class="row-acts">${l.status!=='pago'?`<button class="icon-btn pay" onclick="modalPagarDespesa('${l.id}')">Pagar</button>`:''}<button class="icon-btn" onclick="modalLanc('${l.id}')">⋯</button></div></td></tr>`;}).join('')}</tbody></table>`
+      :`<div class="empty"><div class="big">⊟</div>Nenhuma despesa nesta competência.<br><button class="btn sm" style="margin-top:12px" onclick="abrirGerarDespesas()">Gerar folha + contas fixas</button></div>`}
+    </div>`;
+}
+function modalFuncionario(id){
+  const f=id?S.funcionarios.find(x=>x.id===id):{ativo:true,dia_pagamento:5};
+  openModal(id?'Editar funcionário':'Novo funcionário',`
+    <div class="grid2">
+      <div class="field" style="grid-column:1/3"><label>Nome *</label><input id="fu_nome" value="${esc(f.nome||'')}"></div>
+      <div class="field"><label>Cargo</label><input id="fu_cargo" value="${esc(f.cargo||'')}"></div>
+      <div class="field"><label>Salário</label><input id="fu_sal" class="mono" value="${f.salario?fmtNum(f.salario):''}"></div>
+      <div class="field"><label>Dia de pagamento</label><input id="fu_dia" type="number" min="1" max="31" value="${f.dia_pagamento||5}"></div>
+      <div class="field"><label>Status</label><select id="fu_ativo"><option value="true" ${f.ativo!==false?'selected':''}>Ativo</option><option value="false" ${f.ativo===false?'selected':''}>Inativo</option></select></div>
+    </div>`,
+    `${id?`<button class="btn ghost" onclick="delFuncionario('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
+     <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveFuncionario('${id||''}')">Salvar</button>`);
+}
+async function saveFuncionario(id){
+  const nome=$('fu_nome').value.trim(); if(!nome)return toast('Informe o nome.',true);
+  const rec={ nome, cargo:$('fu_cargo').value.trim()||null, salario:parseMoneyBR($('fu_sal').value)||0,
+    dia_pagamento:+$('fu_dia').value||5, ativo:$('fu_ativo').value==='true' };
+  const q=id?sb.from('funcionarios').update(rec).eq('id',id):sb.from('funcionarios').insert(rec);
+  const {error}=await q; if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderDespesas(); toast('Funcionário salvo.');
+}
+async function delFuncionario(id){ if(!confirm('Excluir funcionário?'))return;
+  const {error}=await sb.from('funcionarios').delete().eq('id',id); if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderDespesas(); toast('Excluído.'); }
+function modalDespFixa(id){
+  const d=id?S.despesasFixas.find(x=>x.id===id):{ativo:true,dia_vencimento:10};
+  const catOpts=catsByTipo('saida').map(c=>`<option value="${c.id}" ${d.categoria_id===c.id?'selected':''}>${esc(c.nome)}</option>`).join('');
+  openModal(id?'Editar conta fixa':'Nova conta fixa',`
+    <div class="grid2">
+      <div class="field" style="grid-column:1/3"><label>Descrição *</label><input id="df_desc" value="${esc(d.descricao||'')}" placeholder="Água, Luz, Internet, Aluguel..."></div>
+      <div class="field"><label>Categoria</label><select id="df_cat"><option value="">—</option>${catOpts}</select></div>
+      <div class="field"><label>Valor base</label><input id="df_valor" class="mono" value="${d.valor?fmtNum(d.valor):''}"></div>
+      <div class="field"><label>Dia de vencimento</label><input id="df_dia" type="number" min="1" max="31" value="${d.dia_vencimento||10}"></div>
+      <div class="field"><label>Status</label><select id="df_ativo"><option value="true" ${d.ativo!==false?'selected':''}>Ativa</option><option value="false" ${d.ativo===false?'selected':''}>Inativa</option></select></div>
+    </div>`,
+    `${id?`<button class="btn ghost" onclick="delDespFixa('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
+     <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveDespFixa('${id||''}')">Salvar</button>`);
+}
+async function saveDespFixa(id){
+  const desc=$('df_desc').value.trim(); if(!desc)return toast('Informe a descrição.',true);
+  const rec={ descricao:desc, categoria_id:$('df_cat').value||null, valor:parseMoneyBR($('df_valor').value)||0,
+    dia_vencimento:+$('df_dia').value||10, ativo:$('df_ativo').value==='true' };
+  const q=id?sb.from('despesas_fixas').update(rec).eq('id',id):sb.from('despesas_fixas').insert(rec);
+  const {error}=await q; if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderDespesas(); toast('Conta fixa salva.');
+}
+async function delDespFixa(id){ if(!confirm('Excluir conta fixa?'))return;
+  const {error}=await sb.from('despesas_fixas').delete().eq('id',id); if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderDespesas(); toast('Excluída.'); }
+function abrirGerarDespesas(){
+  const mes=(despComp||monthStart().slice(0,7));
+  const nf=S.funcionarios.filter(f=>f.ativo).length, nd=S.despesasFixas.filter(d=>d.ativo).length;
+  openModal('Gerar despesas do mês',`
+    <p class="hint" style="margin-top:0">Cria as saídas de <b>folha de pagamento</b> (um lançamento por funcionário ativo) e das <b>contas fixas</b> ativas. Não duplica o que já existir na competência.</p>
+    <div class="field"><label>Competência</label><input id="gd_comp" type="month" value="${mes}"></div>
+    <div style="background:var(--surface-2);border-radius:9px;padding:14px;font-size:13px"><b>${nf}</b> salários + <b>${nd}</b> contas fixas serão gerados.</div>`,
+    `<button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="gerarDespesas()">Gerar</button>`);
+}
+async function gerarDespesas(){
+  const mes=$('gd_comp').value; if(!mes)return toast('Escolha a competência.',true);
+  const comp=mes+'-01';
+  const catFolha=S.categorias.find(c=>c.nome==='Folha de pagamento'&&c.tipo==='saida');
+  const rows=[];
+  S.funcionarios.filter(f=>f.ativo).forEach(f=>{
+    rows.push({ tipo:'saida', categoria_id:catFolha?catFolha.id:null,
+      descricao:`Salário ${esc(f.nome)}${f.cargo?' ('+f.cargo+')':''} · ${compLabel(comp)}`, competencia:comp,
+      vencimento:`${mes}-${String(f.dia_pagamento||5).padStart(2,'0')}`, valor:Number(f.salario),
+      status:'pendente', origem:'gerado', chave_unica:`folha:${f.id}:${comp}` });
+  });
+  S.despesasFixas.filter(d=>d.ativo).forEach(d=>{
+    rows.push({ tipo:'saida', categoria_id:d.categoria_id||null,
+      descricao:`${d.descricao} · ${compLabel(comp)}`, competencia:comp,
+      vencimento:`${mes}-${String(d.dia_vencimento||10).padStart(2,'0')}`, valor:Number(d.valor),
+      status:'pendente', origem:'gerado', chave_unica:`desp:${d.id}:${comp}` });
+  });
+  if(!rows.length){ closeModal(); return toast('Nada a gerar. Cadastre funcionários ou contas fixas.',true); }
+  const {error}=await sb.from('lancamentos').upsert(rows,{onConflict:'chave_unica',ignoreDuplicates:true});
+  if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderDespesas(); toast(`${rows.length} despesas geradas.`);
+}
+function modalPagarDespesa(id){
+  const l=S.lancamentos.find(x=>x.id===id);
+  openModal('Pagar despesa',`
+    <div style="background:var(--surface-2);border-radius:9px;padding:12px 14px;margin-bottom:14px;font-size:13px">
+      ${esc(l.descricao)} · vence ${fmtDate(l.vencimento)}</div>
+    <div class="grid2">
+      <div class="field"><label>Valor pago</label><input id="pd_valor" class="mono" value="${fmtNum(l.valor)}"></div>
+      <div class="field"><label>Data do pagamento</label><input id="pd_data" type="date" value="${todayISO()}"></div>
+      <div class="field" style="grid-column:1/3"><label>Forma</label><select id="pd_forma">${['pix','boleto','transferência','dinheiro','débito automático'].map(f=>`<option>${f}</option>`).join('')}</select></div>
+    </div>`,
+    `<button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="confirmPagarDespesa('${id}')">Confirmar pagamento</button>`);
+}
+async function confirmPagarDespesa(id){
+  const rec={ status:'pago', valor_pago:parseMoneyBR($('pd_valor').value)||0, data_pagamento:$('pd_data').value, forma_pagamento:$('pd_forma').value };
+  const {error}=await sb.from('lancamentos').update(rec).eq('id',id); if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); render(); toast('Despesa paga.');
+}
+
+/* ---------------- FATURAS / ENVIO AO RESPONSÁVEL ---------------- */
+let fatComp='', fatFiltro='pendente';
+function fatContato(a){ return {
+  tel:   a.mae_telefone||a.resp_telefone||a.pai_telefone||'',
+  email: a.mae_email||a.resp_email||a.pai_email||'',
+  nome:  a.mae_nome||a.resp_nome||a.pai_nome||'' }; }
+function waNumero(tel){ let n=(tel||'').replace(/\D/g,''); if(!n)return''; if(n.length<=11)n='55'+n; return n; }
+function fatItens(alunoId,comp){
+  return S.lancamentos.filter(l=>l.tipo==='entrada'&&l.aluno_id===alunoId&&l.competencia===comp&&l.status!=='cancelado')
+    .sort((a,b)=>(a.vencimento||'').localeCompare(b.vencimento||''));
+}
+function fatTexto(alunoId,comp,md){
+  const a=S.alunos.find(x=>x.id===alunoId); const itens=fatItens(alunoId,comp);
+  const total=itens.reduce((s,l)=>s+Number(l.valor),0);
+  const pagoTot=itens.filter(l=>l.status==='pago').reduce((s,l)=>s+Number(l.valor_pago||l.valor),0);
+  const b=md?'*':''; const nl='\n';
+  let t=`${b}${S.config.nome||'Escola'}${b}${nl}Cobrança · ${compLabel(comp)}${nl}${nl}`;
+  t+=`Aluno: ${a.nome}${nl}`;
+  const c=fatContato(a); if(c.nome)t+=`Responsável: ${c.nome}${nl}`;
+  t+=nl;
+  itens.forEach(l=>{ const pg=l.status==='pago'?' ✓ pago':''; 
+    t+=`• ${l.descricao} — venc. ${fmtDate(l.vencimento)} — ${fmtBRL(l.valor)}${pg}${nl}`; });
+  t+=nl+`${b}Total: ${fmtBRL(total)}${b}`;
+  const pend=total-pagoTot;
+  if(pagoTot>0&&pend>0) t+=`${nl}${b}Em aberto: ${fmtBRL(pend)}${b}`;
+  t+=nl+nl+`Em caso de atraso: multa de ${S.config.multa_percent}% + juros de ${S.config.juros_mes_percent}% ao mês.`;
+  return {texto:t,total,pend,itens,aluno:a,contato:c};
+}
+function enviarWhats(alunoId,comp){
+  const f=fatTexto(alunoId,comp,true); const n=waNumero(f.contato.tel);
+  if(!n)return toast('Sem telefone do responsável.',true);
+  window.open(`https://wa.me/${n}?text=${encodeURIComponent(f.texto)}`,'_blank');
+}
+function enviarEmail(alunoId,comp){
+  const f=fatTexto(alunoId,comp,false);
+  if(!f.contato.email)return toast('Sem e-mail do responsável.',true);
+  const subj=`Cobrança ${compLabel(comp)} — ${f.aluno.nome}`;
+  window.open(`mailto:${f.contato.email}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(f.texto)}`,'_blank');
+}
+function copiarFatura(alunoId,comp){ const f=fatTexto(alunoId,comp,false);
+  navigator.clipboard.writeText(f.texto).then(()=>toast('Texto copiado.'),()=>toast('Não foi possível copiar.',true)); }
+function verFatura(alunoId,comp){
+  const f=fatTexto(alunoId,comp,false);
+  openModal('Fatura · '+esc(f.aluno.nome),
+    `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.6;background:var(--surface-2);padding:16px;border-radius:9px;margin:0;color:var(--ink)">${esc(f.texto)}</pre>`,
+    `<button class="btn ghost" onclick="copiarFatura('${alunoId}','${comp}')">Copiar texto</button>
+     <button class="btn ghost" onclick="enviarEmail('${alunoId}','${comp}')">E-mail</button>
+     <button class="btn" onclick="enviarWhats('${alunoId}','${comp}')">WhatsApp</button>`);
+}
+function renderFaturas(){
+  const comp=fatComp?fatComp+'-01':monthStart();
+  const map={};
+  S.lancamentos.filter(l=>l.tipo==='entrada'&&l.competencia===comp&&l.status!=='cancelado'&&l.aluno_id).forEach(l=>{
+    if(!map[l.aluno_id])map[l.aluno_id]={total:0,pend:0,n:0};
+    map[l.aluno_id].total+=Number(l.valor); map[l.aluno_id].n++;
+    if(l.status!=='pago')map[l.aluno_id].pend+=Number(l.valor);
+  });
+  let linhas=Object.entries(map).map(([id,v])=>({a:S.alunos.find(x=>x.id===id),...v})).filter(x=>x.a);
+  if(fatFiltro==='pendente')linhas=linhas.filter(x=>x.pend>0);
+  linhas.sort((a,b)=>a.a.nome.localeCompare(b.a.nome));
+  const comps=[...new Set(S.lancamentos.filter(l=>l.tipo==='entrada'&&l.competencia).map(l=>l.competencia))].sort().reverse();
+  const totalPend=linhas.reduce((s,x)=>s+x.pend,0);
+
+  $('view').innerHTML=head('Enviar cobrança detalhada','Faturas / envio')
+  +`<div class="panel">
+      <div class="filters">
+        <select onchange="fatComp=this.value;renderFaturas()"><option value="">${compLabel(monthStart())} (atual)</option>
+          ${comps.map(c=>`<option value="${c.slice(0,7)}" ${fatComp===c.slice(0,7)?'selected':''}>${compLabel(c)}</option>`).join('')}</select>
+        <select onchange="fatFiltro=this.value;renderFaturas()">
+          <option value="pendente" ${fatFiltro==='pendente'?'selected':''}>Só com saldo em aberto</option>
+          <option value="todos" ${fatFiltro==='todos'?'selected':''}>Todos do mês</option></select>
+        <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${linhas.length} faturas · ${fmtBRL(totalPend)} em aberto</span>
+      </div>
+      <p class="aging-note" style="padding:10px 20px 0">Cada botão abre o WhatsApp ou o e-mail do responsável já com a cobrança detalhada escrita. Você confere e envia. Para enviar a vários, vá clicando linha a linha.</p>
+      ${linhas.length?`<table><thead><tr><th>Aluno</th><th>Responsável</th><th>Contato</th><th class="num">Total</th><th class="num">Em aberto</th><th>Enviar</th></tr></thead>
+      <tbody>${linhas.map(x=>{const c=fatContato(x.a);const id=x.a.id;return `<tr>
+        <td><strong>${esc(x.a.nome)}</strong><div style="font-size:12px;color:var(--ink-soft)">${x.n} ${x.n>1?'itens':'item'}</div></td>
+        <td>${esc(c.nome||'—')}</td>
+        <td style="font-size:12px;color:var(--ink-soft)">${esc(c.tel||c.email||'sem contato')}</td>
+        <td class="num">${fmtNum(x.total)}</td>
+        <td class="num" style="${x.pend>0?'color:var(--clay)':''}">${fmtNum(x.pend)}</td>
+        <td><div class="row-acts">
+          <button class="icon-btn" onclick="verFatura('${id}','${comp}')">Ver</button>
+          <button class="icon-btn pay" onclick="enviarWhats('${id}','${comp}')" ${c.tel?'':'disabled style="opacity:.4"'}>WhatsApp</button>
+          <button class="icon-btn" onclick="enviarEmail('${id}','${comp}')" ${c.email?'':'disabled style="opacity:.4"'}>E-mail</button>
+        </div></td></tr>`;}).join('')}</tbody></table>`
+      :`<div class="empty"><div class="big">✉</div>Nenhuma fatura nesta competência. Gere as cobranças do mês primeiro (aba Cobranças).</div>`}
+    </div>`;
+}
 
 /* ---------------- INADIMPLÊNCIA ---------------- */
 function renderInadimp(){
