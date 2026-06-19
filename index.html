@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <style>
   :root{
     --paper:#FAF7F2; --surface:#FFFFFF; --surface-2:#F3EEE6;
@@ -341,7 +342,7 @@ async function enterApp(){
   $('app').style.display='grid'; $('userEmail').textContent=USER.email;
   $('nav').innerHTML=TABS.map(t=>`<button data-tab="${t.id}" onclick="go('${t.id}')">
     <span class="ic">${t.ic}</span>${t.label}</button>`).join('');
-  await loadAll(); go('painel');
+  await loadAll(); go('painel'); aplicarMarca();
 }
 function go(tab){ TAB=tab;
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
@@ -1114,7 +1115,8 @@ function reciboTexto(alunoId,comp,md){
   pagos.forEach(l=>{ t+=`• ${l.descricao} — ${fmtBRL(l.valor_pago||l.valor)}${nl}`; });
   t+=nl+`Aluno(a): ${a.nome}${nl}Competência: ${compLabel(comp)}${nl}`;
   if(formas.length)t+=`Forma de pagamento: ${formas.join(', ')}${nl}`;
-  t+=`Data: ${ultData?fmtDate(ultData):fmtDate(todayISO())}${nl}${nl}`;
+  const cid=S.config.cidade?S.config.cidade+', ':'';
+  t+=`${cid}${ultData?fmtDate(ultData):fmtDate(todayISO())}${nl}${nl}`;
   t+=`${S.config.nome||'Escola'} — este recibo comprova o pagamento dos itens acima.`;
   return {texto:t,total,pagos,aluno:a,contato:c};
 }
@@ -1124,6 +1126,7 @@ function verRecibo(alunoId,comp){
   openModal('Recibo · '+esc(r.aluno.nome),
     `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.6;background:var(--surface-2);padding:16px;border-radius:9px;margin:0;color:var(--ink)">${esc(r.texto)}</pre>`,
     `<button class="btn ghost" onclick="imprimirRecibo('${alunoId}','${comp}')">Imprimir</button>
+     <button class="btn ghost" onclick="baixarReciboPDF('${alunoId}','${comp}')">Baixar PDF</button>
      <button class="btn ghost" onclick="reciboWhats('${alunoId}','${comp}')">WhatsApp</button>
      <button class="btn" onclick="reciboEmail('${alunoId}','${comp}')">E-mail</button>`);
 }
@@ -1133,20 +1136,58 @@ function reciboWhats(alunoId,comp){ const r=reciboTexto(alunoId,comp,true); cons
 function reciboEmail(alunoId,comp){ const r=reciboTexto(alunoId,comp,false);
   if(!r.contato.email)return toast('Sem e-mail do responsável.',true);
   window.open(`mailto:${r.contato.email}?subject=${encodeURIComponent('Recibo '+compLabel(comp)+' — '+r.aluno.nome)}&body=${encodeURIComponent(r.texto)}`,'_blank'); }
-function imprimirRecibo(alunoId,comp){
-  const r=reciboTexto(alunoId,comp,false);
+function logoHtml(){ return S.config&&S.config.logo_base64
+  ? `<div style="text-align:center;margin-bottom:18px"><img src="${S.config.logo_base64}" style="max-height:80px;max-width:240px;object-fit:contain"></div>` : ''; }
+function imprimirDoc(titulo,texto){
   const w=window.open('','_blank'); if(!w)return toast('Permita pop-ups para imprimir.',true);
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Recibo ${esc(r.aluno.nome)}</title>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(titulo)}</title>
     <style>body{font-family:Inter,Arial,sans-serif;color:#2B2722;padding:48px;max-width:560px;margin:0 auto;line-height:1.6}
-    h1{font-size:18px;border-bottom:2px solid #2F5D50;padding-bottom:8px}pre{white-space:pre-wrap;font-family:inherit;font-size:14px}</style>
-    </head><body><pre>${esc(r.texto)}</pre></body></html>`);
+    pre{white-space:pre-wrap;font-family:inherit;font-size:14px}</style>
+    </head><body>${logoHtml()}<pre>${esc(texto)}</pre></body></html>`);
   w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
 }
+function imprimirRecibo(alunoId,comp){
+  const r=reciboTexto(alunoId,comp,false);
+  imprimirDoc('Recibo '+r.aluno.nome, r.texto);
+}
+function imprimirFatura(alunoId,comp){
+  const f=fatTexto(alunoId,comp,false);
+  imprimirDoc('Fatura '+f.aluno.nome, f.texto);
+}
+function slug(s){ return (s||'doc').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_|_$/g,''); }
+function baixarPDF(texto, nomeArquivo){
+  if(!window.jspdf||!window.jspdf.jsPDF)return toast('Biblioteca de PDF não carregou. Recarregue a página.',true);
+  const { jsPDF }=window.jspdf;
+  const doc=new jsPDF({unit:'pt',format:'a4'});
+  const pageW=doc.internal.pageSize.getWidth(); const margin=56; let y=60;
+  const logo=S.config&&S.config.logo_base64;
+  if(logo){
+    const fmt=logo.includes('image/png')?'PNG':((logo.includes('image/jpeg')||logo.includes('image/jpg'))?'JPEG':null);
+    if(fmt){ try{
+      const p=doc.getImageProperties(logo); const h=58, w=p.width*(h/p.height);
+      doc.addImage(logo,fmt,(pageW-w)/2,y,w,h); y+=h+22;
+    }catch(e){ /* logo inválida: segue sem ela */ } }
+  }
+  const linhas=texto.split('\n');
+  doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.setTextColor(43,39,34);
+  doc.text(linhas[0],margin,y); y+=24;
+  doc.setFont('helvetica','normal'); doc.setFontSize(11);
+  const corpo=doc.splitTextToSize(linhas.slice(1).join('\n'),pageW-margin*2);
+  doc.text(corpo,margin,y,{lineHeightFactor:1.55});
+  doc.save(nomeArquivo);
+}
+function baixarReciboPDF(alunoId,comp){ const r=reciboTexto(alunoId,comp,false);
+  if(!r.pagos.length)return toast('Nenhum item pago nesta competência.',true);
+  baixarPDF(r.texto,`Recibo_${slug(r.aluno.nome)}_${comp}.pdf`); }
+function baixarFaturaPDF(alunoId,comp){ const f=fatTexto(alunoId,comp,false);
+  baixarPDF(f.texto,`Fatura_${slug(f.aluno.nome)}_${comp}.pdf`); }
 function verFatura(alunoId,comp){
   const f=fatTexto(alunoId,comp,false);
   openModal('Fatura · '+esc(f.aluno.nome),
     `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.6;background:var(--surface-2);padding:16px;border-radius:9px;margin:0;color:var(--ink)">${esc(f.texto)}</pre>`,
     `<button class="btn ghost" onclick="copiarFatura('${alunoId}','${comp}')">Copiar texto</button>
+     <button class="btn ghost" onclick="imprimirFatura('${alunoId}','${comp}')">Imprimir</button>
+     <button class="btn ghost" onclick="baixarFaturaPDF('${alunoId}','${comp}')">Baixar PDF</button>
      <button class="btn ghost" onclick="enviarEmail('${alunoId}','${comp}')">E-mail</button>
      <button class="btn" onclick="enviarWhats('${alunoId}','${comp}')">WhatsApp</button>`);
 }
@@ -1399,6 +1440,25 @@ async function runImport(){
 function renderConfig(){
   const c=S.config;
   $('view').innerHTML=head('Ajustes da escola','Configurações')
+  +`<div class="panel"><div class="panel-head"><h2>Identidade da escola</h2></div>
+    <div class="panel-body" style="padding:20px">
+      <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+        <div style="text-align:center">
+          <div id="logoPreview" style="width:120px;height:120px;border:1px dashed var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--surface-2);overflow:hidden">
+            ${c.logo_base64?`<img src="${c.logo_base64}" style="max-width:100%;max-height:100%;object-fit:contain">`:`<span style="color:var(--ink-soft);font-size:12px">sem logo</span>`}
+          </div>
+          <input type="file" id="logoFile" accept="image/png,image/jpeg,image/svg+xml" style="display:none" onchange="carregarLogo(event)">
+          <button class="btn ghost sm" style="margin-top:10px" onclick="$('logoFile').click()">Escolher logo</button>
+          ${c.logo_base64?`<button class="btn ghost sm" style="margin-top:6px;color:var(--bad)" onclick="removerLogo()">Remover</button>`:''}
+        </div>
+        <div style="flex:1;min-width:240px">
+          <div class="field"><label>Nome da escola (sai nos documentos)</label><input id="c_nome" value="${esc(c.nome||'')}"></div>
+          <div class="field" style="margin-top:12px"><label>Cidade (sai nos recibos)</label><input id="c_cidade" value="${esc(c.cidade||'')}" placeholder="Ex: São Paulo"></div>
+          <p class="aging-note" style="margin-top:12px">A logo aparece no topo dos recibos e faturas impressos/baixados. PNG, JPG ou SVG, até ~500 KB. Fundo transparente fica melhor.</p>
+          <button class="btn" style="margin-top:8px" onclick="saveIdentidade()">Salvar identidade</button>
+        </div>
+      </div>
+    </div></div>`
   +`<div class="panel"><div class="panel-head"><h2>Parâmetros financeiros</h2></div>
     <div class="panel-body" style="padding:20px"><div class="grid2">
       <div class="field"><label>Multa por atraso (%)</label><input id="c_multa" type="number" step="0.01" value="${c.multa_percent}"></div>
@@ -1425,6 +1485,30 @@ async function saveConfigEscola(){
     dia_vencimento:+$('c_dia').value, ano_letivo:+$('c_ano').value, updated_at:new Date().toISOString() };
   const {error}=await sb.from('escola_config').update(rec).eq('id',1);
   if(error)return toast(error.message,true); await loadAll(); toast('Parâmetros salvos.');
+}
+let _logoTmp=null;
+function carregarLogo(e){
+  const f=e.target.files[0]; if(!f)return;
+  if(f.size>700000)return toast('Imagem muito grande (máx. ~500 KB). Reduza e tente de novo.',true);
+  const r=new FileReader();
+  r.onload=ev=>{ _logoTmp=ev.target.result;
+    $('logoPreview').innerHTML=`<img src="${_logoTmp}" style="max-width:100%;max-height:100%;object-fit:contain">`;
+    toast('Logo carregada. Clique em Salvar identidade.'); };
+  r.readAsDataURL(f); e.target.value='';
+}
+async function saveIdentidade(){
+  const rec={ nome:$('c_nome').value.trim()||'Escola', cidade:$('c_cidade').value.trim()||null, updated_at:new Date().toISOString() };
+  if(_logoTmp)rec.logo_base64=_logoTmp;
+  const {error}=await sb.from('escola_config').update(rec).eq('id',1);
+  if(error)return toast(error.message,true); _logoTmp=null; await loadAll(); renderConfig(); aplicarMarca(); toast('Identidade salva.');
+}
+async function removerLogo(){ if(!confirm('Remover a logo?'))return;
+  const {error}=await sb.from('escola_config').update({logo_base64:null}).eq('id',1);
+  if(error)return toast(error.message,true); await loadAll(); renderConfig(); aplicarMarca(); toast('Logo removida.'); }
+function aplicarMarca(){
+  // troca o "A" da sidebar pela logo, se houver
+  const m=document.querySelector('.side .brand-mark');
+  if(m&&S.config&&S.config.logo_base64){ m.innerHTML=`<img src="${S.config.logo_base64}" style="max-width:100%;max-height:100%;object-fit:contain">`; m.style.background='#fff'; m.style.padding='3px'; }
 }
 function modalPlano(id){
   const p=id?S.planos.find(x=>x.id===id):{};
