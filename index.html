@@ -232,8 +232,10 @@
    const SB_KEY = "sb_publishable_BK6FWaG0sJ2eMeRN5W8uxA_5QRXRF1f";
 /* ============================================================== */
 
-let sb=null, USER=null, CFG=null;
-const S={ config:null, planos:[], categorias:[], alunos:[], lancamentos:[], cobrancas:[], funcionarios:[], despesasFixas:[], descontos:[] };
+let sb=null, USER=null, CFG=null, ADMIN=false, PAPEL='academico';
+const FIN_TABS=new Set(['painel','cobrancas','faturas','caixa','despesas','inadimp','config']);
+const ADMIN_PRINCIPAL='montessoriana@escolaaguai.com';
+const S={ config:null, planos:[], categorias:[], alunos:[], lancamentos:[], cobrancas:[], funcionarios:[], despesasFixas:[], descontos:[], usuarios:[] };
 const $=id=>document.getElementById(id);
 const LS={ url:'aguai_sb_url', key:'aguai_sb_key' };
 
@@ -351,24 +353,39 @@ const NAV_GROUPS=[
 ];
 let TAB='painel';
 
+async function determinarPapel(){
+  PAPEL='academico';
+  try{
+    const {data}=await sb.from('app_usuarios').select('papel').eq('email',USER.email).maybeSingle();
+    if(data&&data.papel)PAPEL=data.papel;
+  }catch(e){ /* sem registro → acadêmico */ }
+  if(USER.email===ADMIN_PRINCIPAL)PAPEL='admin';   // admin principal nunca perde acesso
+  ADMIN=PAPEL==='admin';
+}
 async function enterApp(){
   $('gateSetup').style.display='none'; $('gateLogin').style.display='none';
-  $('app').style.display='grid'; $('userEmail').textContent=USER.email;
-  $('nav').innerHTML=NAV_GROUPS.map(g=>
-    (g.title?`<div class="nav-group">${g.title}</div>`:'')+
-    g.items.map(t=>`<button data-tab="${t.id}" onclick="go('${t.id}')">
-      <span class="ic">${t.ic}</span>${t.label}</button>`).join('')
-  ).join('');
-  await loadAll(); go('painel'); aplicarMarca();
+  $('app').style.display='grid';
+  await determinarPapel();
+  $('userEmail').innerHTML=`${esc(USER.email)}<br><span style="color:#7C9A90">Acesso: ${ADMIN?'administrador':'acadêmico'}</span>`;
+  $('nav').innerHTML=NAV_GROUPS.map(g=>{
+    const items=g.items.filter(t=>ADMIN||!FIN_TABS.has(t.id));
+    if(!items.length)return '';
+    return (g.title?`<div class="nav-group">${g.title}</div>`:'')+
+      items.map(t=>`<button data-tab="${t.id}" onclick="go('${t.id}')">
+        <span class="ic">${t.ic}</span>${t.label}</button>`).join('');
+  }).join('');
+  await loadAll(); go(ADMIN?'painel':'alunos'); aplicarMarca();
 }
-function go(tab){ TAB=tab;
+function go(tab){
+  if(!ADMIN&&FIN_TABS.has(tab))tab='alunos';   // bloqueio de acesso na UI
+  TAB=tab;
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
   render();
 }
 
 async function loadAll(){
   try{
-    const [cfg,planos,cats,alunos,lanc,cobr,func,despf,desc]=await Promise.all([
+    const [cfg,planos,cats,alunos,lanc,cobr,func,despf,desc,usrs]=await Promise.all([
       sb.from('escola_config').select('*').eq('id',1).single(),
       sb.from('planos').select('*').order('valor_mensalidade'),
       sb.from('categorias').select('*').order('tipo'),
@@ -378,11 +395,12 @@ async function loadAll(){
       sb.from('funcionarios').select('*').order('nome'),
       sb.from('despesas_fixas').select('*').order('descricao'),
       sb.from('aluno_descontos').select('*'),
+      sb.from('app_usuarios').select('*').order('email'),
     ]);
     S.config=cfg.data||{multa_percent:2,juros_mes_percent:1,dia_vencimento:10};
     S.planos=planos.data||[]; S.categorias=cats.data||[];
     S.alunos=alunos.data||[]; S.lancamentos=lanc.data||[];
-    S.cobrancas=cobr.data||[]; S.funcionarios=func.data||[]; S.despesasFixas=despf.data||[]; S.descontos=desc.data||[];
+    S.cobrancas=cobr.data||[]; S.funcionarios=func.data||[]; S.despesasFixas=despf.data||[]; S.descontos=desc.data||[]; S.usuarios=usrs.data||[];
     if(lanc.error) throw lanc.error;
   }catch(e){ toast('Erro ao carregar: '+(e.message||e),true); console.error(e); }
 }
@@ -1470,7 +1488,7 @@ function renderImportar(){
     <div class="field" style="max-width:320px"><label>O que você está importando?</label>
       <select id="imp_type" onchange="IMP.type=this.value;IMP.map={}">
         <option value="alunos">Alunos / matrículas</option>
-        <option value="lancamentos">Lançamentos (mensalidades, pagamentos)</option></select></div>
+        ${ADMIN?'<option value="lancamentos">Lançamentos (mensalidades, pagamentos)</option>':''}</select></div>
     <div class="drop" id="drop" style="margin-top:18px"
       ondragover="event.preventDefault();this.classList.add('hot')"
       ondragleave="this.classList.remove('hot')"
@@ -1633,7 +1651,49 @@ function renderConfig(){
     <div class="panel-body" style="padding:16px 20px">
       <div class="sec-title">Entradas</div><div class="inline-list">${S.categorias.filter(c=>c.tipo==='entrada').map(c=>`<span class="chip"><span class="dot" style="background:${c.cor}"></span>${esc(c.nome)} <button onclick="delCategoria('${c.id}')">×</button></span>`).join('')||'<span style="color:var(--ink-soft)">—</span>'}</div>
       <div class="sec-title">Saídas</div><div class="inline-list">${S.categorias.filter(c=>c.tipo==='saida').map(c=>`<span class="chip"><span class="dot" style="background:${c.cor}"></span>${esc(c.nome)} <button onclick="delCategoria('${c.id}')">×</button></span>`).join('')||'<span style="color:var(--ink-soft)">—</span>'}</div>
+    </div></div>`
+  +`<div class="panel"><div class="panel-head"><h2>Usuários e acesso</h2><button class="btn sm" onclick="modalUsuario()">+ Usuário</button></div>
+    <div class="panel-body" style="padding:0 0 4px">
+      <p class="aging-note" style="padding:12px 20px 4px">Defina quem acessa o quê. <b>Administrador</b> vê tudo; <b>acadêmico</b> não acessa o financeiro. A conta de login (e-mail e senha) é criada no Supabase em Authentication &rarr; Users; aqui você define apenas o nível de acesso.</p>
+      <table><thead><tr><th>E-mail</th><th>Nome</th><th>Acesso</th><th></th></tr></thead>
+      <tbody>${(S.usuarios||[]).map(u=>`<tr>
+        <td><strong>${esc(u.email)}</strong></td><td>${esc(u.nome||'—')}</td>
+        <td>${u.papel==='admin'?'<span class="badge ok">administrador</span>':'<span class="badge muted">acadêmico</span>'}</td>
+        <td><div class="row-acts">
+          <button class="icon-btn" onclick="modalUsuario('${esc(u.email)}')">Editar</button>
+          ${u.email===ADMIN_PRINCIPAL?'':`<button class="icon-btn" onclick="delUsuario('${esc(u.email)}')">×</button>`}</div></td></tr>`).join('')
+        ||'<tr><td colspan="4" class="empty">Nenhum usuário cadastrado.</td></tr>'}</tbody></table>
     </div></div>`;
+}
+function modalUsuario(email){
+  const u=email?(S.usuarios||[]).find(x=>x.email===email):{papel:'academico'};
+  const trava=email===ADMIN_PRINCIPAL;
+  openModal(email?'Editar usuário':'Novo usuário',`
+    <div class="field"><label>E-mail (mesmo do login no Supabase) *</label><input id="u_email" type="email" value="${esc(u.email||'')}" ${email?'disabled':''}></div>
+    <div class="field" style="margin-top:12px"><label>Nome</label><input id="u_nome" value="${esc(u.nome||'')}"></div>
+    <div class="field" style="margin-top:12px"><label>Nível de acesso</label><select id="u_papel" ${trava?'disabled':''}>
+      <option value="academico" ${u.papel==='academico'?'selected':''}>Acadêmico (sem financeiro)</option>
+      <option value="admin" ${u.papel==='admin'?'selected':''}>Administrador (acesso total)</option></select></div>
+    ${trava?'<p class="aging-note" style="margin-top:10px">Este é o administrador principal e não pode ser rebaixado.</p>':''}
+    <p class="aging-note" style="margin-top:10px">Lembre-se de criar também a conta de login no Supabase (Authentication &rarr; Users &rarr; Add user) com este mesmo e-mail.</p>`,
+    `<button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveUsuario('${email||''}')">Salvar</button>`);
+}
+async function saveUsuario(email){
+  const em=(email||$('u_email').value).trim().toLowerCase();
+  if(!em||!em.includes('@'))return toast('Informe um e-mail válido.',true);
+  const rec={ email:em, nome:$('u_nome').value.trim()||null, papel:$('u_papel').value };
+  if(em===ADMIN_PRINCIPAL)rec.papel='admin';
+  const {error}=await sb.from('app_usuarios').upsert(rec,{onConflict:'email'});
+  if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderConfig(); toast('Usuário salvo.');
+}
+async function delUsuario(email){
+  if(email===ADMIN_PRINCIPAL)return toast('O administrador principal não pode ser removido.',true);
+  if(!confirm('Remover o acesso deste usuário? (a conta de login no Supabase permanece)'))return;
+  const {error}=await sb.from('app_usuarios').delete().eq('email',email);
+  if(error)return toast(error.message,true);
+  await loadAll(); renderConfig(); toast('Acesso removido.');
 }
 async function saveConfigEscola(){
   const rec={ multa_percent:+$('c_multa').value, juros_mes_percent:+$('c_juros').value,
