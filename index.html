@@ -59,7 +59,8 @@
   .side .brand-mark{background:#EFE9DF;color:var(--forest-d)}
   .side .brand strong{color:#fff;font-family:'Inter',sans-serif;font-size:16px}
   .side .brand small{color:#A9C3B9}
-  .nav{margin-top:26px;display:flex;flex-direction:column;gap:2px}
+  .nav{margin-top:22px;display:flex;flex-direction:column;gap:2px}
+  .nav-group{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#7C9A90;padding:14px 12px 5px}
   .nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;
     border:none;color:#CBD8D2;padding:10px 12px;border-radius:var(--r-sm);font-size:14px;font-weight:500}
   .nav button .ic{width:18px;text-align:center;opacity:.85}
@@ -324,24 +325,40 @@ function traduzErro(m){ if(/Invalid login/i.test(m))return'E-mail ou senha incor
 /* ===================================================================
    ENTRAR NO APP
 =================================================================== */
-const TABS=[
-  {id:'painel',   label:'Painel',        ic:'◰'},
-  {id:'alunos',   label:'Alunos',        ic:'❑'},
-  {id:'cobrancas',label:'Cobranças',     ic:'❒'},
-  {id:'faturas',  label:'Faturas / envio',ic:'✉'},
-  {id:'caixa',    label:'Fluxo de caixa',ic:'⇅'},
-  {id:'despesas', label:'Despesas',      ic:'⊟'},
-  {id:'inadimp',  label:'Inadimplência', ic:'⚠'},
-  {id:'importar', label:'Importar',      ic:'⇪'},
-  {id:'config',   label:'Configurações', ic:'⚙'},
+const NAV_GROUPS=[
+  {title:'', items:[
+    {id:'painel',   label:'Painel',        ic:'◰'},
+  ]},
+  {title:'Financeiro', items:[
+    {id:'cobrancas',label:'Cobranças',     ic:'❒'},
+    {id:'faturas',  label:'Faturas / envio',ic:'✉'},
+    {id:'caixa',    label:'Fluxo de caixa',ic:'⇅'},
+    {id:'despesas', label:'Despesas',      ic:'⊟'},
+    {id:'inadimp',  label:'Inadimplência', ic:'⚠'},
+  ]},
+  {title:'Acadêmico', items:[
+    {id:'alunos',   label:'Alunos',        ic:'❑'},
+    {id:'documentacao',label:'Documentação',ic:'❏'},
+    {id:'contatos', label:'Contatos',      ic:'☏'},
+    {id:'aniversarios',label:'Aniversários',ic:'✦'},
+    {id:'inclusao', label:'Inclusão',      ic:'♥'},
+    {id:'turmas',   label:'Turmas',        ic:'⊞'},
+  ]},
+  {title:'Sistema', items:[
+    {id:'importar', label:'Importar',      ic:'⇪'},
+    {id:'config',   label:'Configurações', ic:'⚙'},
+  ]},
 ];
 let TAB='painel';
 
 async function enterApp(){
   $('gateSetup').style.display='none'; $('gateLogin').style.display='none';
   $('app').style.display='grid'; $('userEmail').textContent=USER.email;
-  $('nav').innerHTML=TABS.map(t=>`<button data-tab="${t.id}" onclick="go('${t.id}')">
-    <span class="ic">${t.ic}</span>${t.label}</button>`).join('');
+  $('nav').innerHTML=NAV_GROUPS.map(g=>
+    (g.title?`<div class="nav-group">${g.title}</div>`:'')+
+    g.items.map(t=>`<button data-tab="${t.id}" onclick="go('${t.id}')">
+      <span class="ic">${t.ic}</span>${t.label}</button>`).join('')
+  ).join('');
   await loadAll(); go('painel'); aplicarMarca();
 }
 function go(tab){ TAB=tab;
@@ -405,7 +422,8 @@ function encargos(l){
    RENDER ROUTER
 =================================================================== */
 function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCobrancas,faturas:renderFaturas,
-  caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig}[TAB])(); }
+  caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig,
+  documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -1231,6 +1249,143 @@ function renderFaturas(){
         </div></td></tr>`;}).join('')}</tbody></table>`
       :`<div class="empty"><div class="big">✉</div>Nenhuma fatura nesta competência. Gere as cobranças do mês primeiro (aba Cobranças).</div>`}
     </div>`;
+}
+
+/* ================= TELAS ACADÊMICAS ================= */
+function isDocOk(v){ if(!v)return false; const s=String(v).toLowerCase(); return s==='ok'||s==='enviada'; }
+function docBadgeAc(v){ if(!v)return '<span class="badge pend">pendente</span>';
+  if(isDocOk(v))return '<span class="badge ok">OK</span>';
+  if(String(v).toUpperCase()==='NOK')return '<span class="badge bad">NOK</span>';
+  return `<span class="badge late">${esc(v)}</span>`; }
+const SEG_COR={'Educação Infantil':'#3E7C9E','Fundamental I':'#2F5D50','Fundamental II':'#7A5C8A','Ensino Médio':'#D98E2B'};
+function nascMes(a){ return a.data_nascimento?+a.data_nascimento.slice(5,7):0; }
+function nascDia(a){ return a.data_nascimento?+a.data_nascimento.slice(8,10):0; }
+const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+/* ---- Documentação ---- */
+let docAcTipo='todos', docAcSeg='';
+function renderDocumentacao(){
+  let data=S.alunos.filter(a=>a.status==='ativo');
+  const pend=a=>!isDocOk(a.doc_ficha)||!isDocOk(a.doc_drive)||!isDocOk(a.doc_contrato)||a.doc_dir_imagem==='NOK'||!a.doc_dir_imagem||!isDocOk(a.doc_sec_digital);
+  if(docAcTipo==='ficha')data=data.filter(a=>!isDocOk(a.doc_ficha));
+  else if(docAcTipo==='contrato')data=data.filter(a=>!isDocOk(a.doc_contrato));
+  else if(docAcTipo==='drive')data=data.filter(a=>!isDocOk(a.doc_drive));
+  else if(docAcTipo==='imagem')data=data.filter(a=>a.doc_dir_imagem==='NOK'||!a.doc_dir_imagem);
+  else data=data.filter(pend);
+  if(docAcSeg)data=data.filter(a=>a.segmento===docAcSeg);
+  data.sort((a,b)=>a.nome.localeCompare(b.nome));
+  const segs=[...new Set(S.alunos.map(a=>a.segmento).filter(Boolean))];
+  $('view').innerHTML=head('Pendências de documentação','Documentação')
+  +`<div class="panel">
+    <div class="filters">
+      ${[['todos','Com pendência'],['ficha','Sem ficha'],['contrato','Sem contrato'],['drive','Drive incompleto'],['imagem','Sem dir. imagem']]
+        .map(([v,t])=>`<button class="btn sm ${docAcTipo===v?'':'ghost'}" onclick="docAcTipo='${v}';renderDocumentacao()">${t}</button>`).join('')}
+      <select onchange="docAcSeg=this.value;renderDocumentacao()"><option value="">Todos os segmentos</option>
+        ${segs.map(s=>`<option ${docAcSeg===s?'selected':''}>${esc(s)}</option>`).join('')}</select>
+      <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${data.length} alunos</span>
+    </div>
+    ${data.length?`<table><thead><tr><th>Aluno</th><th>Segmento</th><th>Ficha</th><th>Drive</th><th>Contrato</th><th>Dir. imagem</th><th>Sec. digital</th><th>Contato</th></tr></thead>
+    <tbody>${data.map(a=>`<tr class="rl" onclick="modalAluno('${a.id}')">
+      <td><strong>${esc(a.nome)}</strong></td>
+      <td style="font-size:12px">${esc(a.segmento||'—')}${a.ano_serie?' · '+esc(a.ano_serie):''}</td>
+      <td>${docBadgeAc(a.doc_ficha)}</td><td>${docBadgeAc(a.doc_drive)}</td><td>${docBadgeAc(a.doc_contrato)}</td>
+      <td>${docBadgeAc(a.doc_dir_imagem)}</td><td>${docBadgeAc(a.doc_sec_digital)}</td>
+      <td style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_telefone||a.resp_telefone||'—')}</td></tr>`).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">✓</div>Nenhuma pendência neste filtro. Documentação em dia.</div>`}
+  </div>`;
+}
+
+/* ---- Contatos ---- */
+let contQ='', contSeg='';
+function renderContatos(){
+  let data=S.alunos.filter(a=>a.status==='ativo');
+  if(contSeg)data=data.filter(a=>a.segmento===contSeg);
+  if(contQ){const q=contQ.toLowerCase();data=data.filter(a=>a.nome.toLowerCase().includes(q)||(a.mae_nome||'').toLowerCase().includes(q)||(a.pai_nome||'').toLowerCase().includes(q)||(a.mae_telefone||'').includes(q));}
+  data.sort((a,b)=>a.nome.localeCompare(b.nome));
+  const segs=[...new Set(S.alunos.map(a=>a.segmento).filter(Boolean))];
+  const wa=t=>{const n=waNumero(t);return n?`<a href="https://wa.me/${n}" target="_blank" style="color:var(--forest);font-size:11px;text-decoration:none">WhatsApp</a>`:'';};
+  $('view').innerHTML=head('Agenda de contatos','Contatos')
+  +`<div class="panel">
+    <div class="filters">
+      <input class="search" placeholder="Buscar aluno ou responsável..." value="${esc(contQ)}" oninput="contQ=this.value;renderContatos()">
+      <select onchange="contSeg=this.value;renderContatos()"><option value="">Todos os segmentos</option>
+        ${segs.map(s=>`<option ${contSeg===s?'selected':''}>${esc(s)}</option>`).join('')}</select>
+      <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${data.length} alunos</span>
+    </div>
+    ${data.length?`<table><thead><tr><th>Aluno</th><th>Mãe / responsável</th><th>Pai</th><th>E-mail</th></tr></thead>
+    <tbody>${data.map(a=>`<tr>
+      <td><strong>${esc(a.nome)}</strong><div style="font-size:12px;color:var(--ink-soft)">${esc(a.segmento||'')}${a.ano_serie?' · '+esc(a.ano_serie):''}</div></td>
+      <td>${esc(a.mae_nome||a.resp_nome||'—')}${a.mae_telefone||a.resp_telefone?`<div style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_telefone||a.resp_telefone)} ${wa(a.mae_telefone||a.resp_telefone)}</div>`:''}</td>
+      <td>${esc(a.pai_nome||'—')}${a.pai_telefone?`<div style="font-size:12px;color:var(--ink-soft)">${esc(a.pai_telefone)} ${wa(a.pai_telefone)}</div>`:''}</td>
+      <td style="font-size:12px">${a.mae_email||a.resp_email?`<a href="mailto:${esc(a.mae_email||a.resp_email)}" style="color:var(--forest)">${esc(a.mae_email||a.resp_email)}</a>`:'—'}</td></tr>`).join('')}</tbody></table>`
+    :`<div class="empty">Nenhum aluno encontrado.</div>`}
+  </div>`;
+}
+
+/* ---- Aniversários ---- */
+let aniMes=new Date().getMonth()+1;
+function renderAniversarios(){
+  const data=S.alunos.filter(a=>a.status==='ativo'&&nascMes(a)===aniMes).sort((a,b)=>nascDia(a)-nascDia(b));
+  $('view').innerHTML=head('Aniversariantes do mês','Aniversários')
+  +`<div class="panel">
+    <div class="filters" style="gap:6px">
+      ${MESES.map((m,i)=>`<button class="btn sm ${aniMes===i+1?'':'ghost'}" onclick="aniMes=${i+1};renderAniversarios()">${m.slice(0,3)}</button>`).join('')}
+    </div>
+    ${data.length?`<table><thead><tr><th>Data</th><th>Aluno</th><th>Segmento</th><th>Ano</th><th>Contato</th></tr></thead>
+    <tbody>${data.map(a=>`<tr class="rl" onclick="modalAluno('${a.id}')">
+      <td><strong>${String(nascDia(a)).padStart(2,'0')}/${String(aniMes).padStart(2,'0')}</strong></td>
+      <td>${esc(a.nome)}</td><td style="font-size:12px">${esc(a.segmento||'—')}</td>
+      <td style="font-size:12px">${esc(a.ano_serie||'—')}</td>
+      <td style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_telefone||a.resp_telefone||'—')}</td></tr>`).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">✦</div>Nenhum aniversariante em ${MESES[aniMes-1]}.</div>`}
+  </div>`;
+}
+
+/* ---- Inclusão ---- */
+function renderInclusao(){
+  const data=S.alunos.filter(a=>a.diagnostico||a.laudo||a.inclusao_obs).sort((a,b)=>a.nome.localeCompare(b.nome));
+  $('view').innerHTML=head('Alunos em acompanhamento','Inclusão')
+  +`<div class="panel"><div class="panel-head"><h2>Acompanhamento educacional</h2><span style="font-size:13px;color:var(--ink-soft)">${data.length} alunos</span></div>
+    ${data.length?`<table><thead><tr><th>Aluno</th><th>Segmento</th><th>Ano</th><th>Diagnóstico</th><th>Laudo</th><th>Observações</th></tr></thead>
+    <tbody>${data.map(a=>{const laudo=(a.laudo||'').toLowerCase();const lb=laudo==='sim'||laudo==='ok'?'<span class="badge ok">sim</span>':(a.laudo?'<span class="badge muted">'+esc(a.laudo)+'</span>':'<span class="badge pend">—</span>');return `<tr class="rl" onclick="modalAluno('${a.id}')">
+      <td><strong>${esc(a.nome)}</strong></td>
+      <td style="font-size:12px">${esc(a.segmento||'—')}</td><td style="font-size:12px">${esc(a.ano_serie||'—')}</td>
+      <td>${a.diagnostico?'<span class="badge bad">'+esc(a.diagnostico)+'</span>':'—'}</td>
+      <td>${lb}</td><td style="font-size:12px;color:var(--ink-soft)">${esc(a.inclusao_obs||'—')}</td></tr>`;}).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">♥</div>Nenhum aluno com diagnóstico ou laudo registrado.</div>`}
+  </div>`;
+}
+
+/* ---- Turmas ---- */
+function renderTurmas(){
+  const turmas={};
+  S.alunos.filter(a=>a.status==='ativo').forEach(a=>{
+    const seg=a.segmento||'Sem segmento', ano=a.ano_serie||'—', k=seg+'|'+ano;
+    if(!turmas[k])turmas[k]={seg,ano,al:[]}; turmas[k].al.push(a);
+  });
+  const lista=Object.values(turmas).sort((a,b)=>(a.seg+a.ano).localeCompare(b.seg+b.ano));
+  $('view').innerHTML=head('Alunos por turma','Turmas')
+  +`<div class="panel"><div class="panel-body" style="padding:18px">
+    ${lista.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+    ${lista.map(t=>{const cor=SEG_COR[t.seg]||'#9A8C7A';const pers=[...new Set(t.al.map(x=>x.periodo).filter(Boolean))];return `
+      <div class="kpi" style="cursor:pointer;box-shadow:none" onclick="modalTurma('${esc(t.seg).replace(/'/g,"\\'")}','${esc(t.ano).replace(/'/g,"\\'")}')">
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;background:${cor}"></span>
+          <strong style="font-size:15px">${esc(t.ano)}</strong></div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:4px">${esc(t.seg)}</div>
+        <div style="font-size:22px;font-family:'Inter';font-weight:600;margin-top:8px">${t.al.length}<span style="font-size:12px;color:var(--ink-soft);font-weight:400"> alunos</span></div>
+        ${pers.length?`<div style="font-size:11px;color:var(--ink-soft);margin-top:4px">${pers.map(esc).join(', ')}</div>`:''}
+      </div>`;}).join('')}</div>`
+    :`<div class="empty"><div class="big">⊞</div>Cadastre segmento e ano nos alunos para ver as turmas.</div>`}
+  </div></div>`;
+}
+function modalTurma(seg,ano){
+  const al=S.alunos.filter(a=>a.status==='ativo'&&(a.segmento||'Sem segmento')===seg&&(a.ano_serie||'—')===ano).sort((a,b)=>a.nome.localeCompare(b.nome));
+  openModal(`${esc(seg)} · ${esc(ano)}`,
+    `<p class="hint" style="margin-top:0">${al.length} alunos</p>
+     <table><thead><tr><th>Aluno</th><th>Período</th><th>Contato</th></tr></thead>
+     <tbody>${al.map(a=>`<tr><td>${esc(a.nome)}</td><td style="font-size:12px">${esc(a.periodo||'—')}</td>
+       <td style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_telefone||a.resp_telefone||'—')}</td></tr>`).join('')}</tbody></table>`,
+    `<button class="btn" onclick="closeModal()">Fechar</button>`);
 }
 
 /* ---------------- INADIMPLÊNCIA ---------------- */
