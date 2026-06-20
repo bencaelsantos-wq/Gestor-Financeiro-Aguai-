@@ -123,6 +123,14 @@
   .badge.out{background:rgba(181,80,63,.10);color:var(--clay)}
   .badge.in{background:rgba(47,93,80,.10);color:var(--forest)}
   .empty{padding:40px 20px;text-align:center;color:var(--ink-soft)}
+  .bars{display:flex;flex-direction:column;gap:9px}
+  .bar-row{display:flex;align-items:center;gap:10px}
+  .bar-lbl{width:130px;font-size:12.5px;color:var(--ink);text-align:right;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar-track{flex:1;height:18px;background:var(--surface-2);border-radius:6px;overflow:hidden}
+  .bar-fill{display:block;height:100%;border-radius:6px;min-width:2px;transition:width .3s}
+  .bar-val{width:38px;font-size:12.5px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+  .grid2-panels{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid2-panels{grid-template-columns:1fr}.bar-lbl{width:90px}}
   .empty .big{font-size:30px;margin-bottom:8px}
 
   .row-acts{display:flex;gap:6px;justify-content:flex-end}
@@ -235,7 +243,7 @@
 let sb=null, USER=null, CFG=null, ADMIN=false, PAPEL='academico';
 const FIN_TABS=new Set(['painel','cobrancas','faturas','caixa','despesas','inadimp','config']);
 const ADMIN_PRINCIPAL='montessoriana@escolaaguai.com';
-const S={ config:null, planos:[], categorias:[], alunos:[], lancamentos:[], cobrancas:[], funcionarios:[], despesasFixas:[], descontos:[], usuarios:[] };
+const S={ config:null, planos:[], categorias:[], alunos:[], lancamentos:[], cobrancas:[], funcionarios:[], despesasFixas:[], descontos:[], usuarios:[], metas:[] };
 const $=id=>document.getElementById(id);
 const LS={ url:'aguai_sb_url', key:'aguai_sb_key' };
 
@@ -340,11 +348,14 @@ const NAV_GROUPS=[
   ]},
   {title:'Acadêmico', items:[
     {id:'alunos',   label:'Alunos',        ic:'❑'},
+    {id:'turmas',   label:'Turmas',        ic:'⊞'},
     {id:'documentacao',label:'Documentação',ic:'❏'},
     {id:'contatos', label:'Contatos',      ic:'☏'},
     {id:'aniversarios',label:'Aniversários',ic:'✦'},
     {id:'inclusao', label:'Inclusão',      ic:'♥'},
-    {id:'turmas',   label:'Turmas',        ic:'⊞'},
+    {id:'busca',    label:'Busca avançada',ic:'⚲'},
+    {id:'metas',    label:'Metas',         ic:'◎'},
+    {id:'historico',label:'Histórico',     ic:'∿'},
   ]},
   {title:'Sistema', items:[
     {id:'importar', label:'Importar',      ic:'⇪'},
@@ -385,7 +396,7 @@ function go(tab){
 
 async function loadAll(){
   try{
-    const [cfg,planos,cats,alunos,lanc,cobr,func,despf,desc,usrs]=await Promise.all([
+    const [cfg,planos,cats,alunos,lanc,cobr,func,despf,desc,usrs,metas]=await Promise.all([
       sb.from('escola_config').select('*').eq('id',1).single(),
       sb.from('planos').select('*').order('valor_mensalidade'),
       sb.from('categorias').select('*').order('tipo'),
@@ -396,11 +407,12 @@ async function loadAll(){
       sb.from('despesas_fixas').select('*').order('descricao'),
       sb.from('aluno_descontos').select('*'),
       sb.from('app_usuarios').select('*').order('email'),
+      sb.from('metas_matricula').select('*').order('competencia'),
     ]);
     S.config=cfg.data||{multa_percent:2,juros_mes_percent:1,dia_vencimento:10};
     S.planos=planos.data||[]; S.categorias=cats.data||[];
     S.alunos=alunos.data||[]; S.lancamentos=lanc.data||[];
-    S.cobrancas=cobr.data||[]; S.funcionarios=func.data||[]; S.despesasFixas=despf.data||[]; S.descontos=desc.data||[]; S.usuarios=usrs.data||[];
+    S.cobrancas=cobr.data||[]; S.funcionarios=func.data||[]; S.despesasFixas=despf.data||[]; S.descontos=desc.data||[]; S.usuarios=usrs.data||[]; S.metas=metas.data||[];
     if(lanc.error) throw lanc.error;
   }catch(e){ toast('Erro ao carregar: '+(e.message||e),true); console.error(e); }
 }
@@ -441,7 +453,8 @@ function encargos(l){
 =================================================================== */
 function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCobrancas,faturas:renderFaturas,
   caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig,
-  documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas}[TAB])(); }
+  documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas,
+  metas:renderMetas,historico:renderHistorico,busca:renderBusca}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -516,16 +529,27 @@ function renderPainel(){
 }
 
 /* ---------------- ALUNOS ---------------- */
-let alunoFiltro='';
+let alunoFiltro='', alunoSeg='', alunoAno='';
 function renderAlunos(){
-  const list=S.alunos.filter(a=>!alunoFiltro||a.nome.toLowerCase().includes(alunoFiltro)||(a.resp_nome||'').toLowerCase().includes(alunoFiltro));
+  let list=S.alunos.filter(a=>!alunoFiltro||a.nome.toLowerCase().includes(alunoFiltro)||(a.resp_nome||'').toLowerCase().includes(alunoFiltro));
+  if(alunoSeg)list=list.filter(a=>(a.segmento||'')===alunoSeg);
+  if(alunoAno)list=list.filter(a=>(a.ano_serie||'')===alunoAno);
+  const segs=[...new Set(S.alunos.map(a=>a.segmento).filter(Boolean))].sort();
+  const anos=[...new Set(S.alunos.filter(a=>!alunoSeg||a.segmento===alunoSeg).map(a=>a.ano_serie).filter(Boolean))].sort();
+  const turmaAtiva=alunoSeg||alunoAno;
   $('view').innerHTML=head('Base de matrículas','Alunos',
     `<button class="btn ghost sm" onclick="go('importar')">Importar planilha</button>
      <button class="btn sm" onclick="modalAluno()">+ Novo aluno</button>`)
   +`<div class="panel">
-      <div class="filters"><input class="search" placeholder="Buscar por aluno ou responsável..."
-        oninput="alunoFiltro=this.value.toLowerCase();renderAlunos()" value="${esc(alunoFiltro)}">
-        <span style="font-size:13px;color:var(--ink-soft)">${list.length} de ${S.alunos.length}</span></div>
+      <div class="filters" style="flex-wrap:wrap">
+        <input class="search" placeholder="Buscar por aluno ou responsável..."
+          oninput="alunoFiltro=this.value.toLowerCase();renderAlunos()" value="${esc(alunoFiltro)}">
+        <select onchange="alunoSeg=this.value;alunoAno='';renderAlunos()"><option value="">Todos os segmentos</option>
+          ${segs.map(s=>`<option ${alunoSeg===s?'selected':''}>${esc(s)}</option>`).join('')}</select>
+        <select onchange="alunoAno=this.value;renderAlunos()"><option value="">Todos os anos</option>
+          ${anos.map(y=>`<option ${alunoAno===y?'selected':''}>${esc(y)}</option>`).join('')}</select>
+        ${turmaAtiva?`<button class="btn ghost sm" onclick="alunoSeg='';alunoAno='';renderAlunos()">Limpar turma</button>`:''}
+        <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${list.length} de ${S.alunos.length}</span></div>
       ${list.length?`<table><thead><tr><th>Aluno</th><th>Segmento / Ano</th><th>Período</th><th>Contato</th><th>Plano</th><th>Status</th><th></th></tr></thead>
       <tbody>${list.map(a=>{const p=planoDe(a);return `<tr>
         <td><strong>${esc(a.nome)}</strong>${a.ra?`<div style="font-size:12px;color:var(--ink-soft)">RA ${esc(a.ra)}</div>`:''}</td>
@@ -534,11 +558,12 @@ function renderAlunos(){
         <td>${esc(a.mae_telefone||a.resp_telefone||'—')}${a.mae_nome?`<div style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_nome)}</div>`:''}</td>
         <td>${p?esc(p.nome)+' · '+fmtBRL(p.valor_mensalidade):'—'}</td>
         <td><span class="badge ${a.status==='ativo'?'ok':'muted'}">${a.status}</span></td>
-        <td><div class="row-acts"><button class="icon-btn pay" onclick="modalCobrancas('${a.id}')">Cobranças</button><button class="icon-btn" onclick="modalAluno('${a.id}')">Editar</button></div></td>
+        <td><div class="row-acts">${ADMIN?`<button class="icon-btn pay" onclick="modalCobrancas('${a.id}')">Cobranças</button>`:''}<button class="icon-btn" onclick="modalAluno('${a.id}')">Editar</button></div></td>
       </tr>`;}).join('')}</tbody></table>`
-      :`<div class="empty"><div class="big">❑</div>Nenhum aluno ainda. <a href="#" onclick="go('importar');return false">Importe sua planilha</a> ou cadastre manualmente.</div>`}
+      :`<div class="empty"><div class="big">❑</div>Nenhum aluno neste filtro.</div>`}
     </div>`;
 }
+function irParaTurma(seg,ano){ alunoSeg=seg==='Sem segmento'?'':seg; alunoAno=ano==='—'?'':ano; alunoFiltro=''; go('alunos'); }
 function modalAluno(id){
   const a=id?S.alunos.find(x=>x.id===id):{};
   const planoOpts=S.planos.map(p=>`<option value="${p.id}" ${a.plano_id===p.id?'selected':''}>${esc(p.nome)} (${fmtBRL(p.valor_mensalidade)})</option>`).join('');
@@ -1280,6 +1305,126 @@ function nascMes(a){ return a.data_nascimento?+a.data_nascimento.slice(5,7):0; }
 function nascDia(a){ return a.data_nascimento?+a.data_nascimento.slice(8,10):0; }
 const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
+/* ---- helper: gráfico de barras (sem biblioteca) ---- */
+function barras(data,cor){
+  const max=Math.max(1,...data.map(d=>d.v));
+  return `<div class="bars">${data.map(d=>`
+    <div class="bar-row"><span class="bar-lbl">${esc(d.l)}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${Math.round(d.v/max*100)}%;background:${d.cor||cor||'var(--sage)'}"></span></span>
+      <span class="bar-val">${d.v}</span></div>`).join('')}</div>`;
+}
+function matriculadosNoAno(ano){ return S.alunos.filter(a=>a.data_matricula&&a.data_matricula.slice(0,4)==String(ano)); }
+function matriculadosNoMesAno(ano,mes){ const p=`${ano}-${String(mes).padStart(2,'0')}`; return S.alunos.filter(a=>a.data_matricula&&a.data_matricula.slice(0,7)===p).length; }
+
+/* ---- Metas de matrícula ---- */
+let metaAno=new Date().getFullYear();
+function metaDe(ano,mes){ const comp=`${ano}-${String(mes).padStart(2,'0')}-01`; return S.metas.find(m=>m.competencia===comp); }
+function renderMetas(){
+  const anos=[...new Set(S.metas.map(m=>+m.competencia.slice(0,4)).concat(S.alunos.filter(a=>a.data_matricula).map(a=>+a.data_matricula.slice(0,4))).concat([new Date().getFullYear()]))].sort();
+  const metaAnual=[...Array(12)].reduce((s,_,i)=>s+(metaDe(metaAno,i+1)?.matric_esperada||0),0);
+  const realAnual=matriculadosNoAno(metaAno).length;
+  const conv=metaAnual?Math.round(realAnual/metaAnual*100):0;
+  const graf=[...Array(12)].map((_,i)=>({l:MESES[i].slice(0,3),v:matriculadosNoMesAno(metaAno,i+1)}));
+  $('view').innerHTML=head('Metas de matrícula','Metas')
+  +`<div class="filters" style="margin-bottom:14px">
+      <label style="font-size:13px;color:var(--ink-soft)">Ano:</label>
+      <select onchange="metaAno=+this.value;renderMetas()">${anos.map(y=>`<option ${y===metaAno?'selected':''}>${y}</option>`).join('')}</select>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="lbl">Meta do ano</div><div class="val">${metaAnual}</div><div class="sub">matrículas esperadas</div></div>
+      <div class="kpi"><div class="lbl">Matriculados</div><div class="val">${realAnual}</div><div class="sub">realizados em ${metaAno}</div></div>
+      <div class="kpi accent"><div class="lbl">Atingido</div><div class="val">${conv}%</div><div class="sub">da meta anual</div></div>
+    </div>
+    <div class="panel"><div class="panel-head"><h2>Matrículas por mês · ${metaAno}</h2></div>
+      <div class="panel-body" style="padding:16px 20px">${barras(graf,'var(--forest)')}</div></div>
+    <div class="panel"><div class="panel-head"><h2>Detalhe mensal</h2><span style="font-size:12px;color:var(--ink-soft)">você define o esperado; matriculados vêm automático</span></div>
+      <table><thead><tr><th>Mês</th><th class="num">Procura esp.</th><th class="num">Procura real</th><th class="num">Matríc. esperada</th><th class="num">Matriculados</th><th class="num">Conversão</th><th></th></tr></thead>
+      <tbody>${[...Array(12)].map((_,i)=>{const m=metaDe(metaAno,i+1);const real=matriculadosNoMesAno(metaAno,i+1);const esp=m?.matric_esperada||0;const cv=esp?Math.round(real/esp*100):0;
+        return `<tr><td>${MESES[i]}</td>
+          <td class="num">${m?.procura_esperada||0}</td><td class="num">${m?.procura_real||0}</td>
+          <td class="num">${esp}</td><td class="num"><b>${real}</b></td>
+          <td class="num">${esp?cv+'%':'—'}</td>
+          <td><button class="icon-btn" onclick="modalMeta(${metaAno},${i+1})">Editar</button></td></tr>`;}).join('')}</tbody></table>
+    </div>`;
+}
+function modalMeta(ano,mes){
+  const m=metaDe(ano,mes)||{};
+  openModal(`Meta · ${MESES[mes-1]} ${ano}`,`
+    <div class="grid2">
+      <div class="field"><label>Procura esperada (leads)</label><input id="m_pe" class="mono" type="number" value="${m.procura_esperada||0}"></div>
+      <div class="field"><label>Procura real (leads)</label><input id="m_pr" class="mono" type="number" value="${m.procura_real||0}"></div>
+      <div class="field" style="grid-column:1/3"><label>Matrículas esperadas (sua meta)</label><input id="m_me" class="mono" type="number" value="${m.matric_esperada||0}"></div>
+    </div>
+    <p class="aging-note" style="margin-top:10px">Matriculados é contado automaticamente pelas datas de matrícula dos alunos — não precisa preencher.</p>`,
+    `<button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveMeta(${ano},${mes})">Salvar meta</button>`);
+}
+async function saveMeta(ano,mes){
+  const rec={ competencia:`${ano}-${String(mes).padStart(2,'0')}-01`,
+    procura_esperada:+$('m_pe').value||0, procura_real:+$('m_pr').value||0, matric_esperada:+$('m_me').value||0 };
+  const {error}=await sb.from('metas_matricula').upsert(rec,{onConflict:'competencia'});
+  if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderMetas(); toast('Meta salva.');
+}
+
+/* ---- Histórico ---- */
+function renderHistorico(){
+  const ativos=S.alunos.filter(a=>a.status==='ativo');
+  const porSeg=[...new Set(ativos.map(a=>a.segmento||'—'))].map(s=>({l:s,v:ativos.filter(a=>(a.segmento||'—')===s).length,cor:SEG_COR[s]||'#9A8C7A'})).sort((a,b)=>b.v-a.v);
+  const porPer=[...new Set(ativos.map(a=>a.periodo||'—'))].map(p=>({l:p,v:ativos.filter(a=>(a.periodo||'—')===p).length})).sort((a,b)=>b.v-a.v);
+  const comMat=S.alunos.filter(a=>a.data_matricula);
+  const anos=[...new Set(comMat.map(a=>a.data_matricula.slice(0,4)))].sort();
+  const porAno=anos.map(y=>({l:y,v:comMat.filter(a=>a.data_matricula.slice(0,4)===y).length}));
+  const anoAtual=new Date().getFullYear();
+  const porMes=[...Array(12)].map((_,i)=>({l:MESES[i].slice(0,3),v:matriculadosNoMesAno(anoAtual,i+1)}));
+  const fontes=[...new Set(S.alunos.map(a=>a.como_conheceu).filter(Boolean))].map(f=>({l:f,v:S.alunos.filter(a=>a.como_conheceu===f).length})).sort((a,b)=>b.v-a.v);
+  $('view').innerHTML=head('Histórico e distribuição','Histórico')
+  +`<div class="grid2-panels">
+    <div class="panel"><div class="panel-head"><h2>Alunos por segmento</h2></div><div class="panel-body" style="padding:16px 20px">${barras(porSeg)}</div></div>
+    <div class="panel"><div class="panel-head"><h2>Alunos por período</h2></div><div class="panel-body" style="padding:16px 20px">${barras(porPer,'var(--amber)')}</div></div>
+    <div class="panel"><div class="panel-head"><h2>Matrículas por ano</h2></div><div class="panel-body" style="padding:16px 20px">${porAno.length?barras(porAno,'var(--forest)'):'<p class="empty">Sem datas de matrícula registradas.</p>'}</div></div>
+    <div class="panel"><div class="panel-head"><h2>Matrículas em ${anoAtual}</h2></div><div class="panel-body" style="padding:16px 20px">${barras(porMes,'var(--sage)')}</div></div>
+    ${fontes.length?`<div class="panel" style="grid-column:1/3"><div class="panel-head"><h2>Como conheceram a escola</h2></div><div class="panel-body" style="padding:16px 20px">${barras(fontes,'var(--clay)')}</div></div>`:''}
+  </div>`;
+}
+
+/* ---- Busca avançada ---- */
+let buscaF={seg:'',ano:'',bairro:'',fonte:'',periodo:'',diag:'',extra:''};
+function renderBusca(){
+  const A=S.alunos;
+  const opt=(campo)=>[...new Set(A.map(a=>a[campo]).filter(Boolean))].sort();
+  let r=A.slice();
+  if(buscaF.seg)r=r.filter(a=>a.segmento===buscaF.seg);
+  if(buscaF.ano)r=r.filter(a=>a.ano_serie===buscaF.ano);
+  if(buscaF.bairro)r=r.filter(a=>a.bairro===buscaF.bairro);
+  if(buscaF.fonte)r=r.filter(a=>a.como_conheceu===buscaF.fonte);
+  if(buscaF.periodo)r=r.filter(a=>a.periodo===buscaF.periodo);
+  if(buscaF.diag==='com')r=r.filter(a=>a.diagnostico);else if(buscaF.diag==='sem')r=r.filter(a=>!a.diagnostico);
+  if(buscaF.extra==='com')r=r.filter(a=>a.extracurricular);else if(buscaF.extra==='sem')r=r.filter(a=>!a.extracurricular);
+  r.sort((a,b)=>a.nome.localeCompare(b.nome));
+  const sel=(k,lbl,opts)=>`<select onchange="buscaF.${k}=this.value;renderBusca()"><option value="">${lbl}</option>${opts.map(o=>`<option ${buscaF[k]===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+  $('view').innerHTML=head('Busca avançada de alunos','Busca avançada')
+  +`<div class="panel"><div class="panel-body" style="padding:16px 20px">
+    <div class="filters" style="flex-wrap:wrap;gap:8px">
+      ${sel('seg','Segmento',opt('segmento'))}
+      ${sel('ano','Ano/série',opt('ano_serie'))}
+      ${sel('bairro','Bairro',opt('bairro'))}
+      ${sel('periodo','Período',opt('periodo'))}
+      ${sel('fonte','Como conheceu',opt('como_conheceu'))}
+      <select onchange="buscaF.diag=this.value;renderBusca()"><option value="">Diagnóstico: todos</option><option value="com" ${buscaF.diag==='com'?'selected':''}>Com diagnóstico</option><option value="sem" ${buscaF.diag==='sem'?'selected':''}>Sem diagnóstico</option></select>
+      <select onchange="buscaF.extra=this.value;renderBusca()"><option value="">Extracurricular: todos</option><option value="com" ${buscaF.extra==='com'?'selected':''}>Com extracurricular</option><option value="sem" ${buscaF.extra==='sem'?'selected':''}>Sem extracurricular</option></select>
+      <button class="btn ghost sm" onclick="buscaF={seg:'',ano:'',bairro:'',fonte:'',periodo:'',diag:'',extra:''};renderBusca()">Limpar</button>
+      <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${r.length} de ${A.length}</span>
+    </div></div>
+    ${r.length?`<table><thead><tr><th>Aluno</th><th>Segmento</th><th>Ano</th><th>Período</th><th>Bairro</th><th>Como conheceu</th></tr></thead>
+    <tbody>${r.map(a=>`<tr class="rl" onclick="modalAluno('${a.id}')">
+      <td><strong>${esc(a.nome)}</strong></td><td style="font-size:12px">${esc(a.segmento||'—')}</td>
+      <td style="font-size:12px">${esc(a.ano_serie||'—')}</td><td style="font-size:12px">${esc(a.periodo||'—')}</td>
+      <td style="font-size:12px">${esc(a.bairro||'—')}</td><td style="font-size:12px">${esc(a.como_conheceu||'—')}</td></tr>`).join('')}</tbody></table>`
+    :'<div class="empty">Nenhum aluno com esses filtros.</div>'}
+  </div>`;
+}
+
 /* ---- Documentação ---- */
 let docAcTipo='todos', docAcSeg='';
 function renderDocumentacao(){
@@ -1403,7 +1548,8 @@ function modalTurma(seg,ano){
      <table><thead><tr><th>Aluno</th><th>Período</th><th>Contato</th></tr></thead>
      <tbody>${al.map(a=>`<tr><td>${esc(a.nome)}</td><td style="font-size:12px">${esc(a.periodo||'—')}</td>
        <td style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_telefone||a.resp_telefone||'—')}</td></tr>`).join('')}</tbody></table>`,
-    `<button class="btn" onclick="closeModal()">Fechar</button>`);
+    `<button class="btn ghost" onclick="closeModal()">Fechar</button>
+     <button class="btn" onclick="closeModal();irParaTurma('${esc(seg).replace(/'/g,"\\'")}','${esc(ano).replace(/'/g,"\\'")}')">Ver na lista de alunos</button>`);
 }
 
 /* ---------------- INADIMPLÊNCIA ---------------- */
