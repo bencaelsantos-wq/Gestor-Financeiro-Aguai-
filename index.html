@@ -59,7 +59,12 @@
   .side .brand-mark{background:#EFE9DF;color:var(--forest-d)}
   .side .brand strong{color:#fff;font-family:'Inter',sans-serif;font-size:16px}
   .side .brand small{color:#A9C3B9}
-  .nav{margin-top:22px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;min-height:0}
+  .nav{margin-top:22px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;min-height:0;
+    scrollbar-width:thin;scrollbar-color:rgba(175,201,191,.25) transparent}
+  .nav::-webkit-scrollbar{width:5px}
+  .nav::-webkit-scrollbar-track{background:transparent}
+  .nav::-webkit-scrollbar-thumb{background:rgba(175,201,191,.22);border-radius:6px}
+  .nav:hover::-webkit-scrollbar-thumb{background:rgba(175,201,191,.4)}
   .nav-group{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#7C9A90;padding:14px 12px 5px}
   .nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;
     border:none;color:#CBD8D2;padding:10px 12px;border-radius:var(--r-sm);font-size:14px;font-weight:500}
@@ -1645,7 +1650,13 @@ function renderImportar(){
       <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleFile(this.files[0])">
     </div>
     <p class="hint">A planilha precisa ter uma linha de cabeçalho. Você associa cada coluna na próxima etapa — não importa a ordem nem o nome exato.</p>
-  </div></div><div id="impArea"></div>`;
+  </div></div>
+  <div class="panel"><div class="panel-head"><h2>Padronizar turmas dos alunos atuais</h2></div>
+    <div class="panel-body" style="padding:18px 20px">
+      <p class="aging-note" style="margin-bottom:12px">Revê os <b>${S.alunos.length}</b> alunos já cadastrados e organiza o <b>segmento</b> (Educação Infantil, Fundamental I, Fundamental II, Ensino Médio) e o <b>período</b> (Matutino, Vespertino, Meio período, Período estendido). Você confere a classificação de cada turma antes de aplicar — nada muda sem sua confirmação.</p>
+      <button class="btn" onclick="modalPadronizar()">Revisar e padronizar turmas</button>
+    </div></div>
+  <div id="impArea"></div>`;
 }
 function handleFile(file){
   if(!file)return; const reader=new FileReader();
@@ -1700,6 +1711,77 @@ function renderPreview(){
         Importar ${IMP.rows.length} ${IMP.type==='alunos'?'alunos':'lançamentos'}</button>
     </div></div>`;
 }
+/* ---- Padronização de segmento e período ---- */
+function classificaSegmento(txt){
+  if(!txt)return null; const s=String(txt).toLowerCase();
+  // Educação Infantil — inclui nomenclatura Montessori e creche
+  if(/infantil|maternal|ber[çc]|jardim|pr[eé]\b|pr[eé]-|pr[eé]\s|n[íi]vel|mini\s*grupo|minigrupo|grupo\s*\d|casa\s*dos|agrupad|\bg[1-5]\b|\bgi+\b|\bn[1-5]\b/.test(s))return 'Educação Infantil';
+  if(/m[ée]dio|\bem\b/.test(s))return 'Ensino Médio';
+  const mm=s.match(/(\d+)\s*[ºoª°]?\s*(ano|s[ée]rie)/)||s.match(/^\s*(\d+)\s*[ºoª°]/)||s.match(/^\s*(\d+)\b/);
+  const n=mm?parseInt(mm[1]):null;
+  if(n>=1&&n<=5)return 'Fundamental I';
+  if(n>=6&&n<=9)return 'Fundamental II';
+  if(/fundamental\s*(i\b|1|um|menor|anos?\s*iniciais)/.test(s))return 'Fundamental I';
+  if(/fundamental\s*(ii|2|dois|maior|anos?\s*finais)/.test(s))return 'Fundamental II';
+  if(/fundamental/.test(s))return 'Fundamental I';
+  return null;
+}
+function normSegmento(segRaw,anoRaw){
+  return classificaSegmento(segRaw)||classificaSegmento(anoRaw)||(segRaw?String(segRaw).trim():null);
+}
+function normPeriodo(v){
+  if(!v)return v||null; const s=String(v).toLowerCase().trim();
+  if(/estendid|integral|tempo integral/.test(s))return 'Período estendido';
+  if(/matutin|manh/.test(s))return 'Matutino';
+  if(/vespertin|tarde/.test(s))return 'Vespertino';
+  if(/meio/.test(s))return 'Meio período';
+  return String(v).trim();
+}
+let PADR={seg:{},per:{}};
+function modalPadronizar(){
+  // valores distintos de origem: combina segmento bruto + ano para classificar segmento
+  const chaveSeg=a=>(a.segmento||a.ano_serie||'(vazio)');
+  const segVals=[...new Set(S.alunos.map(chaveSeg))].sort();
+  const perVals=[...new Set(S.alunos.map(a=>a.periodo||'(vazio)'))].sort();
+  PADR={seg:{},per:{}};
+  segVals.forEach(v=>{ PADR.seg[v]=v==='(vazio)'?'':(classificaSegmento(v)||''); });
+  perVals.forEach(v=>{ PADR.per[v]=v==='(vazio)'?'':normPeriodo(v); });
+  const SEGS=['Educação Infantil','Fundamental I','Fundamental II','Ensino Médio'];
+  const PERS=['Matutino','Vespertino','Meio período','Período estendido','Integral'];
+  const cnt=v=>S.alunos.filter(a=>chaveSeg(a)===v).length;
+  const cntP=v=>S.alunos.filter(a=>(a.periodo||'(vazio)')===v).length;
+  const optsSeg=cur=>`<option value="">— não definir —</option>`+SEGS.map(s=>`<option ${cur===s?'selected':''}>${s}</option>`).join('');
+  const optsPer=cur=>`<option value="">— manter vazio —</option>`+PERS.map(p=>`<option ${cur===p?'selected':''}>${p}</option>`).join('');
+  openModal('Revisar padronização de turmas',`
+    <p class="hint" style="margin-top:0">Confira para qual <b>segmento</b> cada valor da sua base será enviado. O que não foi reconhecido aparece em branco — escolha manualmente. O segmento é deduzido do ano/série quando o campo segmento está vazio.</p>
+    <div class="sec-title">Segmento (${segVals.length} valores na base)</div>
+    <table><thead><tr><th>Valor atual</th><th class="num">Alunos</th><th>Vira o segmento</th></tr></thead>
+    <tbody>${segVals.map(v=>`<tr>
+      <td>${esc(v)}</td><td class="num">${cnt(v)}</td>
+      <td><select onchange="PADR.seg[${JSON.stringify(v).replace(/"/g,'&quot;')}]=this.value">${optsSeg(PADR.seg[v])}</select></td></tr>`).join('')}</tbody></table>
+    <div class="sec-title" style="margin-top:16px">Período (${perVals.length} valores na base)</div>
+    <table><thead><tr><th>Valor atual</th><th class="num">Alunos</th><th>Vira o período</th></tr></thead>
+    <tbody>${perVals.map(v=>`<tr>
+      <td>${esc(v)}</td><td class="num">${cntP(v)}</td>
+      <td><select onchange="PADR.per[${JSON.stringify(v).replace(/"/g,'&quot;')}]=this.value">${optsPer(PADR.per[v])}</select></td></tr>`).join('')}</tbody></table>`,
+    `<button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="aplicarPadronizacao()">Aplicar a todos os alunos</button>`);
+}
+async function aplicarPadronizacao(){
+  const chaveSeg=a=>(a.segmento||a.ano_serie||'(vazio)');
+  const ups=[];
+  S.alunos.forEach(a=>{
+    const novoSeg=PADR.seg[chaveSeg(a)]||null;
+    const novoPer=PADR.per[a.periodo||'(vazio)']||null;
+    if(novoSeg!==(a.segmento||null)||novoPer!==(a.periodo||null))
+      ups.push({id:a.id,segmento:novoSeg,periodo:novoPer});
+  });
+  if(!ups.length){closeModal();return toast('Nada a alterar — já está padronizado.');}
+  if(!confirm(`Aplicar a ${ups.length} aluno(s)?`))return;
+  closeModal(); toast('Padronizando...');
+  for(const u of ups){ await sb.from('alunos').update({segmento:u.segmento,periodo:u.periodo}).eq('id',u.id); }
+  await loadAll(); toast(`${ups.length} alunos padronizados.`); render();
+}
 async function runImport(){
   const m=IMP.map;
   if(IMP.type==='alunos'){
@@ -1715,6 +1797,9 @@ async function runImport(){
       // datas
       if(m.data_nascimento)o.data_nascimento=parseDateCell(r[m.data_nascimento]);
       if(m.data_matricula)o.data_matricula=parseDateCell(r[m.data_matricula]);
+      // padroniza segmento (deriva do ano se vazio) e período
+      o.segmento=normSegmento(o.segmento,o.ano_serie);
+      if(o.periodo)o.periodo=normPeriodo(o.periodo);
       // status normalizado
       if(m.status){const s=String(r[m.status]||'').toLowerCase();o.status=s.includes('inativ')?'inativo':(s.includes('tranc')?'trancado':'ativo');}
       // chave de dedupe: CPF resp, senão nome+nascimento (separa xarás)
