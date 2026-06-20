@@ -598,9 +598,9 @@ function modalAluno(id){
       ${F('agrupada','Turma agrupada')}
       ${F('extracurricular','Extracurricular')}
 
-      ${sec('Financeiro')}
+      ${ADMIN?`${sec('Financeiro')}
       <div class="field"><label>Plano</label><select id="a_plano"><option value="">—</option>${planoOpts}</select></div>
-      <div class="field"><label>Dia de vencimento</label><input id="a_dia" type="number" min="1" max="28" value="${a.dia_vencimento||''}" placeholder="${S.config.dia_vencimento}"></div>
+      <div class="field"><label>Dia de vencimento</label><input id="a_dia" type="number" min="1" max="28" value="${a.dia_vencimento||''}" placeholder="${S.config.dia_vencimento}"></div>`:''}
 
       ${sec('Endereço')}
       <div class="field" style="grid-column:1/3"><label>Logradouro</label><input id="a_logradouro" value="${esc(a.logradouro||'')}"></div>
@@ -673,7 +673,7 @@ async function saveAluno(id){
     ra:v('ra'), rg:v('rg'), cpf:v('cpf'), rg_expedicao:v('rg_expedicao'), email_escolar:v('email_escolar'),
     segmento:v('segmento'), ano_serie:v('ano_serie'), periodo:v('periodo'),
     horario:v('horario'), agrupada:v('agrupada'), extracurricular:v('extracurricular'),
-    plano_id:$('a_plano').value||null, dia_vencimento:$('a_dia').value?+$('a_dia').value:null,
+    ...(ADMIN?{plano_id:$('a_plano').value||null, dia_vencimento:$('a_dia').value?+$('a_dia').value:null}:{}),
     logradouro:v('logradouro'), numero:v('numero'), complemento:v('complemento'), bairro:v('bairro'),
     cidade:v('cidade'), estado:v('estado'), cep:v('cep'),
     mae_nome:v('mae_nome'), mae_telefone:v('mae_telefone'), mae_email:v('mae_email'), mae_rg:v('mae_rg'), mae_cpf:v('mae_cpf'),
