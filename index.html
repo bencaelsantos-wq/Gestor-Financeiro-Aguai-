@@ -585,7 +585,9 @@ function modalAluno(id){
       <div class="field"><label>Sexo</label><select id="a_sexo"><option value="">—</option>${['Fem','Masc'].map(s=>`<option ${a.sexo===s?'selected':''}>${s}</option>`).join('')}</select></div>
       ${F('data_nascimento','Nascimento','date')}
       ${F('ra','RA')}
+      ${F('rg','RG do aluno')}
       ${F('cpf','CPF do aluno')}
+      ${F('rg_expedicao','Expedição RG')}
       ${F('email_escolar','E-mail escolar','email')}
 
       ${sec('Acadêmico')}
@@ -603,6 +605,7 @@ function modalAluno(id){
       ${sec('Endereço')}
       <div class="field" style="grid-column:1/3"><label>Logradouro</label><input id="a_logradouro" value="${esc(a.logradouro||'')}"></div>
       ${F('numero','Número')}
+      ${F('complemento','Complemento')}
       ${F('bairro','Bairro')}
       ${F('cidade','Cidade')}
       ${F('estado','Estado')}
@@ -612,11 +615,15 @@ function modalAluno(id){
       <div class="field" style="grid-column:1/3"><label>Nome</label><input id="a_mae_nome" value="${esc(a.mae_nome||'')}"></div>
       ${Ftel('mae_telefone','Telefone')}
       ${F('mae_email','E-mail','email')}
+      ${F('mae_rg','RG da mãe')}
+      ${F('mae_cpf','CPF da mãe')}
 
       ${sec('Pai / responsável')}
       <div class="field" style="grid-column:1/3"><label>Nome</label><input id="a_pai_nome" value="${esc(a.pai_nome||'')}"></div>
       ${Ftel('pai_telefone','Telefone')}
       ${F('pai_email','E-mail','email')}
+      ${F('pai_rg','RG do pai')}
+      ${F('pai_cpf','CPF do pai')}
 
       ${sec('Responsável financeiro (quem paga)')}
       <div class="field" style="grid-column:1/3"><label>Nome</label><input id="a_resp_nome" value="${esc(a.resp_nome||'')}"></div>
@@ -627,19 +634,32 @@ function modalAluno(id){
       ${sec('Matrícula')}
       ${F('data_matricula','Data de matrícula','date')}
       ${F('como_conheceu','Como conheceu')}
+      ${F('de_onde_veio','De onde veio')}
+      ${F('ano_entrada','Ano de entrada')}
+      ${F('serie_entrada','Série de entrada')}
+      ${F('data_saida','Data de saída')}
       ${F('escola_anterior','Escola anterior',undefined,true)}
 
       ${sec('Inclusão')}
       ${F('diagnostico','Diagnóstico')}
       ${F('laudo','Laudo (sim/não)')}
       <div class="field" style="grid-column:1/3"><label>Observações de inclusão</label><input id="a_inclusao_obs" value="${esc(a.inclusao_obs||'')}"></div>
+      ${F('curriculo_adaptado','Currículo adaptado',undefined,true)}
 
       ${sec('Documentação')}
       ${docSel('doc_ficha','Ficha cadastral')}
       ${docSel('doc_drive','Doc. Drive')}
+      ${docSel('doc_imp','Doc. impressa')}
       ${docSel('doc_contrato','Contrato')}
       ${docSel('doc_dir_imagem','Direito de imagem')}
       ${docSel('doc_sec_digital','Secretaria digital')}
+      ${docSel('doc_sptrans','SPTrans')}
+      ${docSel('doc_celular','Celular')}
+      ${docSel('doc_atestado_edf','Atestado Ed. Física')}
+      ${docSel('doc_historico','Histórico escolar')}
+      ${docSel('doc_english_stars','English Stars')}
+      ${docSel('doc_fichario','Fichário')}
+      ${docSel('doc_divisorias','Divisórias')}
     </div>`,
     `${id?`<button class="btn ghost" onclick="delAluno('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
@@ -650,19 +670,22 @@ async function saveAluno(id){
   const v=k=>{const el=$('a_'+k);return el?(el.value.trim?el.value.trim():el.value)||null:null;};
   const rec={ nome, status:$('a_status').value, sexo:v('sexo'),
     data_nascimento:$('a_data_nascimento').value||null,
-    ra:v('ra'), cpf:v('cpf'), email_escolar:v('email_escolar'),
+    ra:v('ra'), rg:v('rg'), cpf:v('cpf'), rg_expedicao:v('rg_expedicao'), email_escolar:v('email_escolar'),
     segmento:v('segmento'), ano_serie:v('ano_serie'), periodo:v('periodo'),
     horario:v('horario'), agrupada:v('agrupada'), extracurricular:v('extracurricular'),
     plano_id:$('a_plano').value||null, dia_vencimento:$('a_dia').value?+$('a_dia').value:null,
-    logradouro:v('logradouro'), numero:v('numero'), bairro:v('bairro'),
+    logradouro:v('logradouro'), numero:v('numero'), complemento:v('complemento'), bairro:v('bairro'),
     cidade:v('cidade'), estado:v('estado'), cep:v('cep'),
-    mae_nome:v('mae_nome'), mae_telefone:v('mae_telefone'), mae_email:v('mae_email'),
-    pai_nome:v('pai_nome'), pai_telefone:v('pai_telefone'), pai_email:v('pai_email'),
+    mae_nome:v('mae_nome'), mae_telefone:v('mae_telefone'), mae_email:v('mae_email'), mae_rg:v('mae_rg'), mae_cpf:v('mae_cpf'),
+    pai_nome:v('pai_nome'), pai_telefone:v('pai_telefone'), pai_email:v('pai_email'), pai_rg:v('pai_rg'), pai_cpf:v('pai_cpf'),
     resp_nome:v('resp_nome'), resp_cpf:v('resp_cpf'), resp_telefone:v('resp_telefone'), resp_email:v('resp_email'),
     data_matricula:$('a_data_matricula').value||null, como_conheceu:v('como_conheceu'), escola_anterior:v('escola_anterior'),
-    diagnostico:v('diagnostico'), laudo:v('laudo'), inclusao_obs:v('inclusao_obs'),
-    doc_ficha:v('doc_ficha'), doc_drive:v('doc_drive'), doc_contrato:v('doc_contrato'),
-    doc_dir_imagem:v('doc_dir_imagem'), doc_sec_digital:v('doc_sec_digital') };
+    de_onde_veio:v('de_onde_veio'), ano_entrada:v('ano_entrada'), serie_entrada:v('serie_entrada'), data_saida:v('data_saida'),
+    diagnostico:v('diagnostico'), laudo:v('laudo'), inclusao_obs:v('inclusao_obs'), curriculo_adaptado:v('curriculo_adaptado'),
+    doc_ficha:v('doc_ficha'), doc_drive:v('doc_drive'), doc_imp:v('doc_imp'), doc_contrato:v('doc_contrato'),
+    doc_dir_imagem:v('doc_dir_imagem'), doc_sec_digital:v('doc_sec_digital'), doc_sptrans:v('doc_sptrans'),
+    doc_celular:v('doc_celular'), doc_atestado_edf:v('doc_atestado_edf'), doc_historico:v('doc_historico'),
+    doc_english_stars:v('doc_english_stars'), doc_fichario:v('doc_fichario'), doc_divisorias:v('doc_divisorias') };
   const q=id?sb.from('alunos').update(rec).eq('id',id):sb.from('alunos').insert(rec);
   const {error}=await q; if(error)return toast(error.message,true);
   closeModal(); await loadAll(); renderAlunos(); toast('Aluno salvo.');
@@ -1407,7 +1430,7 @@ function renderBusca(){
   if(buscaF.diag==='com')r=r.filter(a=>a.diagnostico);else if(buscaF.diag==='sem')r=r.filter(a=>!a.diagnostico);
   if(buscaF.extra==='com')r=r.filter(a=>a.extracurricular);else if(buscaF.extra==='sem')r=r.filter(a=>!a.extracurricular);
   r.sort((a,b)=>a.nome.localeCompare(b.nome));
-  const sel=(k,lbl,opts)=>`<select onchange="buscaF.${k}=this.value;renderBusca()"><option value="">${lbl}</option>${opts.map(o=>`<option ${buscaF[k]===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+  const sel=(k,lbl,opts)=>`<select onchange="buscaF.${k}=this.value;renderBusca()" ${opts.length?'':'disabled style="opacity:.5"'}><option value="">${lbl}${opts.length?'':' (sem dados)'}</option>${opts.map(o=>`<option ${buscaF[k]===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
   $('view').innerHTML=head('Busca avançada de alunos','Busca avançada')
   +`<div class="panel"><div class="panel-body" style="padding:16px 20px">
     <div class="filters" style="flex-wrap:wrap;gap:8px">
@@ -1525,26 +1548,34 @@ function renderInclusao(){
 }
 
 /* ---- Turmas (agrupadas Montessori) ---- */
+let turmaPer='';
 function renderTurmas(){
-  const turmas={};
-  S.alunos.filter(a=>a.status==='ativo').forEach(a=>{
-    const t=a.agrupada||'Sem turma';
-    if(!turmas[t])turmas[t]={turma:t,al:[]}; turmas[t].al.push(a);
-  });
-  const lista=Object.values(turmas).sort((a,b)=>a.turma.localeCompare(b.turma,'pt',{numeric:true}));
-  $('view').innerHTML=head('Alunos por turma','Turmas')
-  +`<div class="panel"><div class="panel-body" style="padding:18px">
-    ${lista.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
-    ${lista.map(t=>{const segs=[...new Set(t.al.map(x=>x.segmento).filter(Boolean))];const cor=SEG_COR[segs[0]]||'#9A8C7A';const pers=[...new Set(t.al.map(x=>x.periodo).filter(Boolean))];return `
+  const ativos=S.alunos.filter(a=>a.status==='ativo'&&(!turmaPer||(a.periodo||'Sem período')===turmaPer));
+  const pers=[...new Set(S.alunos.filter(a=>a.status==='ativo').map(a=>a.periodo||'Sem período'))].sort();
+  const cardTurma=t=>{const segs=[...new Set(t.al.map(x=>x.segmento).filter(Boolean))];const cor=SEG_COR[segs[0]]||'#9A8C7A';const ps=[...new Set(t.al.map(x=>x.periodo).filter(Boolean))];return `
       <div class="kpi" style="cursor:pointer;box-shadow:none" onclick="modalTurma('${esc(t.turma).replace(/'/g,"\\'")}')">
         <div style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;background:${cor}"></span>
           <strong style="font-size:15px">${esc(t.turma)}</strong></div>
         <div style="font-size:12px;color:var(--ink-soft);margin-top:4px">${segs.map(esc).join(' · ')||'—'}</div>
         <div style="font-size:22px;font-family:'Inter';font-weight:600;margin-top:8px">${t.al.length}<span style="font-size:12px;color:var(--ink-soft);font-weight:400"> alunos</span></div>
-        ${pers.length?`<div style="font-size:11px;color:var(--ink-soft);margin-top:4px">${pers.map(esc).join(', ')}</div>`:''}
-      </div>`;}).join('')}</div>`
-    :`<div class="empty"><div class="big">⊞</div>Sem turmas. Rode a correção de turmas (corrigir_turmas.sql) para popular as agrupadas.</div>`}
-  </div></div>`;
+        ${ps.length?`<div style="font-size:11px;color:var(--ink-soft);margin-top:4px">${ps.map(esc).join(', ')}</div>`:''}
+      </div>`;};
+  // agrupa por período -> dentro de cada período, por turma agrupada
+  const secoes=pers.filter(p=>!turmaPer||p===turmaPer).map(per=>{
+    const turmas={};
+    ativos.filter(a=>(a.periodo||'Sem período')===per).forEach(a=>{const t=a.agrupada||'Sem turma';(turmas[t]=turmas[t]||{turma:t,al:[]}).al.push(a);});
+    const lt=Object.values(turmas).sort((a,b)=>a.turma.localeCompare(b.turma,'pt',{numeric:true}));
+    if(!lt.length)return '';
+    const tot=lt.reduce((s,t)=>s+t.al.length,0);
+    return `<div class="panel"><div class="panel-head"><h2>${esc(per)}</h2><span style="font-size:13px;color:var(--ink-soft)">${tot} alunos</span></div>
+      <div class="panel-body" style="padding:16px 18px"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">${lt.map(cardTurma).join('')}</div></div></div>`;
+  }).join('');
+  $('view').innerHTML=head('Alunos por turma','Turmas')
+  +`<div class="filters" style="margin-bottom:14px">
+      <button class="btn sm ${turmaPer===''?'':'ghost'}" onclick="turmaPer='';renderTurmas()">Todos os períodos</button>
+      ${pers.map(p=>`<button class="btn sm ${turmaPer===p?'':'ghost'}" onclick="turmaPer='${esc(p).replace(/'/g,"\\'")}';renderTurmas()">${esc(p)}</button>`).join('')}
+    </div>
+    ${secoes||`<div class="panel"><div class="empty"><div class="big">⊞</div>Sem turmas. Rode corrigir_turmas.sql para popular as agrupadas.</div></div>`}`;
 }
 function modalTurma(turma){
   const al=S.alunos.filter(a=>a.status==='ativo'&&(a.agrupada||'Sem turma')===turma).sort((a,b)=>a.nome.localeCompare(b.nome));
