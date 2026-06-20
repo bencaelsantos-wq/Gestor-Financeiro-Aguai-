@@ -534,14 +534,14 @@ function renderPainel(){
 }
 
 /* ---------------- ALUNOS ---------------- */
-let alunoFiltro='', alunoSeg='', alunoAno='';
+let alunoFiltro='', alunoSeg='', alunoAgr='';
 function renderAlunos(){
   let list=S.alunos.filter(a=>!alunoFiltro||a.nome.toLowerCase().includes(alunoFiltro)||(a.resp_nome||'').toLowerCase().includes(alunoFiltro));
   if(alunoSeg)list=list.filter(a=>(a.segmento||'')===alunoSeg);
-  if(alunoAno)list=list.filter(a=>(a.ano_serie||'')===alunoAno);
+  if(alunoAgr)list=list.filter(a=>(a.agrupada||'')===alunoAgr);
   const segs=[...new Set(S.alunos.map(a=>a.segmento).filter(Boolean))].sort();
-  const anos=[...new Set(S.alunos.filter(a=>!alunoSeg||a.segmento===alunoSeg).map(a=>a.ano_serie).filter(Boolean))].sort();
-  const turmaAtiva=alunoSeg||alunoAno;
+  const turmas=[...new Set(S.alunos.filter(a=>!alunoSeg||a.segmento===alunoSeg).map(a=>a.agrupada).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt',{numeric:true}));
+  const turmaAtiva=alunoSeg||alunoAgr;
   $('view').innerHTML=head('Base de matrículas','Alunos',
     `<button class="btn ghost sm" onclick="go('importar')">Importar planilha</button>
      <button class="btn sm" onclick="modalAluno()">+ Novo aluno</button>`)
@@ -549,26 +549,26 @@ function renderAlunos(){
       <div class="filters" style="flex-wrap:wrap">
         <input class="search" placeholder="Buscar por aluno ou responsável..."
           oninput="alunoFiltro=this.value.toLowerCase();renderAlunos()" value="${esc(alunoFiltro)}">
-        <select onchange="alunoSeg=this.value;alunoAno='';renderAlunos()"><option value="">Todos os segmentos</option>
+        <select onchange="alunoSeg=this.value;alunoAgr='';renderAlunos()"><option value="">Todos os segmentos</option>
           ${segs.map(s=>`<option ${alunoSeg===s?'selected':''}>${esc(s)}</option>`).join('')}</select>
-        <select onchange="alunoAno=this.value;renderAlunos()"><option value="">Todos os anos</option>
-          ${anos.map(y=>`<option ${alunoAno===y?'selected':''}>${esc(y)}</option>`).join('')}</select>
-        ${turmaAtiva?`<button class="btn ghost sm" onclick="alunoSeg='';alunoAno='';renderAlunos()">Limpar turma</button>`:''}
+        <select onchange="alunoAgr=this.value;renderAlunos()"><option value="">Todas as turmas</option>
+          ${turmas.map(y=>`<option ${alunoAgr===y?'selected':''}>${esc(y)}</option>`).join('')}</select>
+        ${turmaAtiva?`<button class="btn ghost sm" onclick="alunoSeg='';alunoAgr='';renderAlunos()">Limpar</button>`:''}
         <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${list.length} de ${S.alunos.length}</span></div>
-      ${list.length?`<table><thead><tr><th>Aluno</th><th>Segmento / Ano</th><th>Período</th><th>Contato</th><th>Plano</th><th>Status</th><th></th></tr></thead>
+      ${list.length?`<table><thead><tr><th>Aluno</th><th>Turma</th><th>Segmento / Ano</th><th>Período</th><th>Contato</th><th>Status</th><th></th></tr></thead>
       <tbody>${list.map(a=>{const p=planoDe(a);return `<tr>
         <td><strong>${esc(a.nome)}</strong>${a.ra?`<div style="font-size:12px;color:var(--ink-soft)">RA ${esc(a.ra)}</div>`:''}</td>
-        <td>${esc(a.segmento||'—')}${a.ano_serie?` · ${esc(a.ano_serie)}`:''}</td>
-        <td>${esc(a.periodo||'—')}</td>
+        <td style="font-size:12px">${esc(a.agrupada||'—')}</td>
+        <td style="font-size:12px">${esc(a.segmento||'—')}${a.ano_serie?` · ${esc(a.ano_serie)}`:''}</td>
+        <td style="font-size:12px">${esc(a.periodo||'—')}</td>
         <td>${esc(a.mae_telefone||a.resp_telefone||'—')}${a.mae_nome?`<div style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_nome)}</div>`:''}</td>
-        <td>${p?esc(p.nome)+' · '+fmtBRL(p.valor_mensalidade):'—'}</td>
         <td><span class="badge ${a.status==='ativo'?'ok':'muted'}">${a.status}</span></td>
         <td><div class="row-acts">${ADMIN?`<button class="icon-btn pay" onclick="modalCobrancas('${a.id}')">Cobranças</button>`:''}<button class="icon-btn" onclick="modalAluno('${a.id}')">Editar</button></div></td>
       </tr>`;}).join('')}</tbody></table>`
       :`<div class="empty"><div class="big">❑</div>Nenhum aluno neste filtro.</div>`}
     </div>`;
 }
-function irParaTurma(seg,ano){ alunoSeg=seg==='Sem segmento'?'':seg; alunoAno=ano==='—'?'':ano; alunoFiltro=''; go('alunos'); }
+function irParaTurma(turma){ alunoAgr=turma==='Sem turma'?'':turma; alunoSeg=''; alunoFiltro=''; go('alunos'); }
 function modalAluno(id){
   const a=id?S.alunos.find(x=>x.id===id):{};
   const planoOpts=S.planos.map(p=>`<option value="${p.id}" ${a.plano_id===p.id?'selected':''}>${esc(p.nome)} (${fmtBRL(p.valor_mensalidade)})</option>`).join('');
@@ -1524,37 +1524,37 @@ function renderInclusao(){
   </div>`;
 }
 
-/* ---- Turmas ---- */
+/* ---- Turmas (agrupadas Montessori) ---- */
 function renderTurmas(){
   const turmas={};
   S.alunos.filter(a=>a.status==='ativo').forEach(a=>{
-    const seg=a.segmento||'Sem segmento', ano=a.ano_serie||'—', k=seg+'|'+ano;
-    if(!turmas[k])turmas[k]={seg,ano,al:[]}; turmas[k].al.push(a);
+    const t=a.agrupada||'Sem turma';
+    if(!turmas[t])turmas[t]={turma:t,al:[]}; turmas[t].al.push(a);
   });
-  const lista=Object.values(turmas).sort((a,b)=>(a.seg+a.ano).localeCompare(b.seg+b.ano));
+  const lista=Object.values(turmas).sort((a,b)=>a.turma.localeCompare(b.turma,'pt',{numeric:true}));
   $('view').innerHTML=head('Alunos por turma','Turmas')
   +`<div class="panel"><div class="panel-body" style="padding:18px">
     ${lista.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
-    ${lista.map(t=>{const cor=SEG_COR[t.seg]||'#9A8C7A';const pers=[...new Set(t.al.map(x=>x.periodo).filter(Boolean))];return `
-      <div class="kpi" style="cursor:pointer;box-shadow:none" onclick="modalTurma('${esc(t.seg).replace(/'/g,"\\'")}','${esc(t.ano).replace(/'/g,"\\'")}')">
+    ${lista.map(t=>{const segs=[...new Set(t.al.map(x=>x.segmento).filter(Boolean))];const cor=SEG_COR[segs[0]]||'#9A8C7A';const pers=[...new Set(t.al.map(x=>x.periodo).filter(Boolean))];return `
+      <div class="kpi" style="cursor:pointer;box-shadow:none" onclick="modalTurma('${esc(t.turma).replace(/'/g,"\\'")}')">
         <div style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:50%;background:${cor}"></span>
-          <strong style="font-size:15px">${esc(t.ano)}</strong></div>
-        <div style="font-size:12px;color:var(--ink-soft);margin-top:4px">${esc(t.seg)}</div>
+          <strong style="font-size:15px">${esc(t.turma)}</strong></div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:4px">${segs.map(esc).join(' · ')||'—'}</div>
         <div style="font-size:22px;font-family:'Inter';font-weight:600;margin-top:8px">${t.al.length}<span style="font-size:12px;color:var(--ink-soft);font-weight:400"> alunos</span></div>
         ${pers.length?`<div style="font-size:11px;color:var(--ink-soft);margin-top:4px">${pers.map(esc).join(', ')}</div>`:''}
       </div>`;}).join('')}</div>`
-    :`<div class="empty"><div class="big">⊞</div>Cadastre segmento e ano nos alunos para ver as turmas.</div>`}
+    :`<div class="empty"><div class="big">⊞</div>Sem turmas. Rode a correção de turmas (corrigir_turmas.sql) para popular as agrupadas.</div>`}
   </div></div>`;
 }
-function modalTurma(seg,ano){
-  const al=S.alunos.filter(a=>a.status==='ativo'&&(a.segmento||'Sem segmento')===seg&&(a.ano_serie||'—')===ano).sort((a,b)=>a.nome.localeCompare(b.nome));
-  openModal(`${esc(seg)} · ${esc(ano)}`,
+function modalTurma(turma){
+  const al=S.alunos.filter(a=>a.status==='ativo'&&(a.agrupada||'Sem turma')===turma).sort((a,b)=>a.nome.localeCompare(b.nome));
+  openModal(esc(turma),
     `<p class="hint" style="margin-top:0">${al.length} alunos</p>
-     <table><thead><tr><th>Aluno</th><th>Período</th><th>Contato</th></tr></thead>
-     <tbody>${al.map(a=>`<tr><td>${esc(a.nome)}</td><td style="font-size:12px">${esc(a.periodo||'—')}</td>
+     <table><thead><tr><th>Aluno</th><th>Ano</th><th>Período</th><th>Contato</th></tr></thead>
+     <tbody>${al.map(a=>`<tr><td>${esc(a.nome)}</td><td style="font-size:12px">${esc(a.ano_serie||'—')}</td><td style="font-size:12px">${esc(a.periodo||'—')}</td>
        <td style="font-size:12px;color:var(--ink-soft)">${esc(a.mae_telefone||a.resp_telefone||'—')}</td></tr>`).join('')}</tbody></table>`,
     `<button class="btn ghost" onclick="closeModal()">Fechar</button>
-     <button class="btn" onclick="closeModal();irParaTurma('${esc(seg).replace(/'/g,"\\'")}','${esc(ano).replace(/'/g,"\\'")}')">Ver na lista de alunos</button>`);
+     <button class="btn" onclick="closeModal();irParaTurma('${esc(turma).replace(/'/g,"\\'")}')">Ver na lista de alunos</button>`);
 }
 
 /* ---------------- INADIMPLÊNCIA ---------------- */
