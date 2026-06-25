@@ -248,7 +248,7 @@
 let sb=null, USER=null, CFG=null, ADMIN=false, PAPEL='academico';
 const FIN_TABS=new Set(['painel','cobrancas','faturas','caixa','despesas','inadimp','config']);
 const ADMIN_PRINCIPAL='montessoriana@escolaaguai.com';
-const S={ config:null, planos:[], categorias:[], alunos:[], lancamentos:[], cobrancas:[], funcionarios:[], despesasFixas:[], descontos:[], usuarios:[], metas:[] };
+const S={ config:null, planos:[], categorias:[], alunos:[], lancamentos:[], cobrancas:[], funcionarios:[], despesasFixas:[], descontos:[], usuarios:[], metas:[], rematriculas:[], acordos:[], acordoParcelas:[] };
 const $=id=>document.getElementById(id);
 const LS={ url:'aguai_sb_url', key:'aguai_sb_key' };
 
@@ -350,6 +350,8 @@ const NAV_GROUPS=[
     {id:'caixa',    label:'Fluxo de caixa',ic:'⇅'},
     {id:'despesas', label:'Despesas',      ic:'⊟'},
     {id:'inadimp',  label:'Inadimplência', ic:'⚠'},
+    {id:'rematriculas',label:'Rematrícula', ic:'↻'},
+    {id:'acordos',  label:'Acordos',       ic:'≈'},
   ]},
   {title:'Acadêmico', items:[
     {id:'alunos',   label:'Alunos',        ic:'❑'},
@@ -401,7 +403,7 @@ function go(tab){
 
 async function loadAll(){
   try{
-    const [cfg,planos,cats,alunos,lanc,cobr,func,despf,desc,usrs,metas]=await Promise.all([
+    const [cfg,planos,cats,alunos,lanc,cobr,func,despf,desc,usrs,metas,remat,acord,acordParc]=await Promise.all([
       sb.from('escola_config').select('*').eq('id',1).single(),
       sb.from('planos').select('*').order('valor_mensalidade'),
       sb.from('categorias').select('*').order('tipo'),
@@ -413,11 +415,14 @@ async function loadAll(){
       sb.from('aluno_descontos').select('*'),
       sb.from('app_usuarios').select('*').order('email'),
       sb.from('metas_matricula').select('*').order('competencia'),
+      sb.from('rematriculas').select('*').order('created_at',{ascending:false}),
+      sb.from('acordos').select('*').order('created_at',{ascending:false}),
+      sb.from('acordo_parcelas').select('*').order('competencia'),
     ]);
     S.config=cfg.data||{multa_percent:2,juros_mes_percent:1,dia_vencimento:10};
     S.planos=planos.data||[]; S.categorias=cats.data||[];
     S.alunos=alunos.data||[]; S.lancamentos=lanc.data||[];
-    S.cobrancas=cobr.data||[]; S.funcionarios=func.data||[]; S.despesasFixas=despf.data||[]; S.descontos=desc.data||[]; S.usuarios=usrs.data||[]; S.metas=metas.data||[];
+    S.cobrancas=cobr.data||[]; S.funcionarios=func.data||[]; S.despesasFixas=despf.data||[]; S.descontos=desc.data||[]; S.usuarios=usrs.data||[]; S.metas=metas.data||[]; S.rematriculas=remat.data||[]; S.acordos=acord.data||[]; S.acordoParcelas=acordParc.data||[];
     if(lanc.error) throw lanc.error;
   }catch(e){ toast('Erro ao carregar: '+(e.message||e),true); console.error(e); }
 }
@@ -459,7 +464,8 @@ function encargos(l){
 function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCobrancas,faturas:renderFaturas,
   caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig,
   documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas,
-  metas:renderMetas,historico:renderHistorico,busca:renderBusca}[TAB])(); }
+  metas:renderMetas,historico:renderHistorico,busca:renderBusca,
+  rematriculas:renderRematriculas,acordos:renderAcordos}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -630,6 +636,25 @@ function modalAluno(id){
       ${F('resp_cpf','CPF')}
       ${Ftel('resp_telefone','Telefone')}
       <div class="field" style="grid-column:1/3"><label>E-mail</label><input id="a_resp_email" type="email" value="${esc(a.resp_email||'')}"></div>
+      ${F('resp_parentesco','Parentesco')}
+      ${F('resp_cep','CEP')}
+      <div class="field" style="grid-column:1/3"><label>Logradouro</label><input id="a_resp_logradouro" value="${esc(a.resp_logradouro||'')}"></div>
+      ${F('resp_numero','Número')}
+      ${F('resp_complemento','Complemento')}
+      ${F('resp_bairro','Bairro')}
+      ${F('resp_cidade','Cidade')}
+      ${F('resp_estado','Estado')}
+      ${ADMIN?`${sec('Proposta financeira')}
+      ${F('prop_modo','Tipo (Novo/Antigo)')}
+      ${F('prop_primeira_parcela','1ª parcela (R$)')}
+      ${F('prop_primeira_modo','Modo 1ª parcela')}
+      ${F('prop_12x','12 parcelas (R$)')}
+      ${F('prop_12x_modo','Modo 12x')}
+      ${F('prop_taxa','Taxa (R$)')}
+      ${F('prop_valor_bruto','Valor bruto (R$)')}
+      ${F('prop_desconto','Desconto (R$)')}
+      ${F('prop_valor_total','Valor total (R$)')}
+      ${F('prop_vencimento','Vencimento')}`:''}
 
       ${sec('Matrícula')}
       ${F('data_matricula','Data de matrícula','date')}
@@ -679,6 +704,14 @@ async function saveAluno(id){
     mae_nome:v('mae_nome'), mae_telefone:v('mae_telefone'), mae_email:v('mae_email'), mae_rg:v('mae_rg'), mae_cpf:v('mae_cpf'),
     pai_nome:v('pai_nome'), pai_telefone:v('pai_telefone'), pai_email:v('pai_email'), pai_rg:v('pai_rg'), pai_cpf:v('pai_cpf'),
     resp_nome:v('resp_nome'), resp_cpf:v('resp_cpf'), resp_telefone:v('resp_telefone'), resp_email:v('resp_email'),
+    resp_parentesco:v('resp_parentesco'), resp_cep:v('resp_cep'), resp_logradouro:v('resp_logradouro'),
+    resp_numero:v('resp_numero'), resp_complemento:v('resp_complemento'), resp_bairro:v('resp_bairro'),
+    resp_cidade:v('resp_cidade'), resp_estado:v('resp_estado'),
+    ...(ADMIN?{prop_modo:v('prop_modo'), prop_primeira_parcela:parseMoneyBR(v('prop_primeira_parcela')),
+      prop_primeira_modo:v('prop_primeira_modo'), prop_12x:parseMoneyBR(v('prop_12x')), prop_12x_modo:v('prop_12x_modo'),
+      prop_taxa:parseMoneyBR(v('prop_taxa')), prop_valor_bruto:parseMoneyBR(v('prop_valor_bruto')),
+      prop_desconto:parseMoneyBR(v('prop_desconto')), prop_valor_total:parseMoneyBR(v('prop_valor_total')),
+      prop_vencimento:v('prop_vencimento')}:{}),
     data_matricula:$('a_data_matricula').value||null, como_conheceu:v('como_conheceu'), escola_anterior:v('escola_anterior'),
     de_onde_veio:v('de_onde_veio'), ano_entrada:v('ano_entrada'), serie_entrada:v('serie_entrada'), data_saida:v('data_saida'),
     diagnostico:v('diagnostico'), laudo:v('laudo'), inclusao_obs:v('inclusao_obs'), curriculo_adaptado:v('curriculo_adaptado'),
@@ -1870,6 +1903,135 @@ async function runImport(){
   if(error)return toast(error.message,true);
   await loadAll(); toast(`${rows.length} lançamentos importados.`); go('cobrancas');
 }
+
+/* ---------------- REMATRÍCULA ---------------- */
+function renderRematriculas(){
+  const lista=[...S.rematriculas].sort((a,b)=>(b.ano_letivo||0)-(a.ano_letivo||0)||(a.aluno_nome||'').localeCompare(b.aluno_nome||''));
+  $('view').innerHTML=head('Rematrícula · reajuste e aceite','Rematrícula',
+    `<button class="btn sm" onclick="modalRematricula()">+ Rematrícula</button>`)
+  +`<div class="panel">
+    ${lista.length?`<table><thead><tr><th>Aluno</th><th>Ano</th><th>Período / Série</th><th class="num">Valor anterior</th><th class="num">%</th><th class="num">Valor final</th><th>Aceite</th><th></th></tr></thead>
+    <tbody>${lista.map(r=>`<tr>
+      <td><strong>${esc(r.aluno_nome||alunoNome(r.aluno_id))}</strong></td>
+      <td>${r.ano_letivo||'—'}</td>
+      <td style="font-size:12px">${esc(r.periodo||'—')}${r.ano_serie?' · '+esc(r.ano_serie):''}</td>
+      <td class="num">${r.valor_2025?fmtNum(r.valor_2025):'—'}</td>
+      <td class="num">${r.porcentagem!=null?r.porcentagem+'%':'—'}</td>
+      <td class="num">${r.valor_final?fmtNum(r.valor_final):'—'}</td>
+      <td>${r.aceite?'<span class="badge ok">aceito'+(r.data_aceite?' '+fmtDate(r.data_aceite):'')+'</span>':'<span class="badge pend">pendente</span>'}</td>
+      <td><div class="row-acts"><button class="icon-btn" onclick="modalRematricula('${r.id}')">Editar</button></div></td></tr>`).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">↻</div>Nenhuma rematrícula registrada.</div>`}
+  </div>`;
+}
+function modalRematricula(id){
+  const r=id?S.rematriculas.find(x=>x.id===id):{ano_letivo:new Date().getFullYear(),aceite:false};
+  const aluOpts=S.alunos.map(a=>`<option value="${a.id}" ${r.aluno_id===a.id?'selected':''}>${esc(a.nome)}</option>`).join('');
+  openModal(id?'Editar rematrícula':'Nova rematrícula',`
+    <div class="grid2">
+      <div class="field" style="grid-column:1/3"><label>Aluno</label><select id="rm_aluno"><option value="">—</option>${aluOpts}</select></div>
+      <div class="field"><label>Ano letivo</label><input id="rm_ano" type="number" value="${r.ano_letivo||''}"></div>
+      <div class="field"><label>Período</label><input id="rm_periodo" value="${esc(r.periodo||'')}"></div>
+      <div class="field"><label>Ano / série</label><input id="rm_serie" value="${esc(r.ano_serie||'')}"></div>
+      <div class="field"><label>Valor anterior (R$)</label><input id="rm_v2025" class="mono" value="${r.valor_2025?fmtNum(r.valor_2025):''}"></div>
+      <div class="field"><label>Reajuste (%)</label><input id="rm_pct" class="mono" type="number" step="0.01" value="${r.porcentagem!=null?r.porcentagem:''}"></div>
+      <div class="field"><label>Valor final (R$)</label><input id="rm_vfinal" class="mono" value="${r.valor_final?fmtNum(r.valor_final):''}"></div>
+      <div class="field"><label>Valor adicional (R$)</label><input id="rm_vadic" class="mono" value="${r.valor_adicional?fmtNum(r.valor_adicional):''}"></div>
+      <div class="field"><label>Forma de pagamento</label><input id="rm_forma" value="${esc(r.forma_pg||'')}"></div>
+      <div class="field"><label>Aceite</label><select id="rm_aceite"><option value="false" ${!r.aceite?'selected':''}>Pendente</option><option value="true" ${r.aceite?'selected':''}>Aceito</option></select></div>
+      <div class="field"><label>Data do aceite</label><input id="rm_dataaceite" type="date" value="${r.data_aceite||''}"></div>
+      <div class="field"><label>Feito em</label><input id="rm_feito" type="date" value="${r.feito_em||''}"></div>
+    </div>`,
+    `${id?`<button class="btn ghost" onclick="delRematricula('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
+     <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveRematricula('${id||''}')">Salvar</button>`);
+}
+async function saveRematricula(id){
+  const aluno_id=$('rm_aluno').value||null;
+  const aluno_nome=aluno_id?(S.alunos.find(a=>a.id===aluno_id)||{}).nome:null;
+  const rec={ aluno_id, aluno_nome, ano_letivo:+$('rm_ano').value||null, periodo:$('rm_periodo').value.trim()||null,
+    ano_serie:$('rm_serie').value.trim()||null, valor_2025:parseMoneyBR($('rm_v2025').value),
+    porcentagem:$('rm_pct').value!==''?+$('rm_pct').value:null, valor_final:parseMoneyBR($('rm_vfinal').value),
+    valor_adicional:parseMoneyBR($('rm_vadic').value), forma_pg:$('rm_forma').value.trim()||null,
+    aceite:$('rm_aceite').value==='true', data_aceite:$('rm_dataaceite').value||null, feito_em:$('rm_feito').value||null };
+  const q=id?sb.from('rematriculas').update(rec).eq('id',id):sb.from('rematriculas').insert(rec);
+  const {error}=await q; if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderRematriculas(); toast('Rematrícula salva.');
+}
+async function delRematricula(id){ if(!confirm('Excluir esta rematrícula?'))return;
+  const {error}=await sb.from('rematriculas').delete().eq('id',id); if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderRematriculas(); toast('Excluída.'); }
+
+/* ---------------- ACORDOS ---------------- */
+function renderAcordos(){
+  const lista=[...S.acordos].sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+  $('view').innerHTML=head('Acordos de parcelamento','Acordos',
+    `<button class="btn sm" onclick="modalAcordo()">+ Acordo</button>`)
+  +`<div class="panel">
+    ${lista.length?`<table><thead><tr><th>Aluno</th><th class="num">Valor total</th><th class="num">Parcelas</th><th class="num">Pagas</th><th>Status</th><th></th></tr></thead>
+    <tbody>${lista.map(ac=>{const ps=S.acordoParcelas.filter(p=>p.acordo_id===ac.id);const pagas=ps.filter(p=>p.pago).length;return `<tr>
+      <td><strong>${esc(ac.aluno_nome||alunoNome(ac.aluno_id))}</strong></td>
+      <td class="num">${ac.valor_total?fmtNum(ac.valor_total):'—'}</td>
+      <td class="num">${ac.qtd_parcelas||ps.length||'—'}</td>
+      <td class="num">${pagas}/${ps.length}</td>
+      <td><span class="badge ${ac.status==='quitado'?'ok':(ac.status==='cancelado'?'muted':'pend')}">${esc(ac.status||'ativo')}</span></td>
+      <td><div class="row-acts"><button class="icon-btn" onclick="modalAcordo('${ac.id}')">Abrir</button></div></td></tr>`;}).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">≈</div>Nenhum acordo registrado.</div>`}
+  </div>`;
+}
+function modalAcordo(id){
+  const ac=id?S.acordos.find(x=>x.id===id):{status:'ativo'};
+  const aluOpts=S.alunos.map(a=>`<option value="${a.id}" ${ac.aluno_id===a.id?'selected':''}>${esc(a.nome)}</option>`).join('');
+  const ps=id?S.acordoParcelas.filter(p=>p.acordo_id===id).sort((a,b)=>(a.competencia||'').localeCompare(b.competencia||'')):[];
+  const parcelasHtml=id?(ps.length?`<table style="margin-top:8px"><thead><tr><th>Competência</th><th class="num">Valor</th><th>Pago</th><th></th></tr></thead>
+    <tbody>${ps.map(p=>`<tr><td>${p.competencia?compLabel(p.competencia):'—'}</td>
+      <td class="num">${p.valor?fmtNum(p.valor):'—'}</td>
+      <td>${p.pago?'<span class="badge ok">pago '+(p.data_pagamento?fmtDate(p.data_pagamento):'')+'</span>':'<span class="badge pend">em aberto</span>'}</td>
+      <td><div class="row-acts">${p.pago?'':`<button class="icon-btn pay" onclick="pagarParcelaAcordo('${p.id}','${id}')">Pagar</button>`}</div></td></tr>`).join('')}</tbody></table>`
+    :'<p class="aging-note">Sem parcelas. Gere abaixo.</p>'):'<p class="aging-note">Salve o acordo primeiro para gerar as parcelas.</p>';
+  openModal(id?'Acordo':'Novo acordo',`
+    <div class="grid2">
+      <div class="field" style="grid-column:1/3"><label>Aluno</label><select id="ac_aluno"><option value="">—</option>${aluOpts}</select></div>
+      <div class="field"><label>Valor total da dívida (R$)</label><input id="ac_total" class="mono" value="${ac.valor_total?fmtNum(ac.valor_total):''}"></div>
+      <div class="field"><label>Nº de parcelas</label><input id="ac_qtd" type="number" min="1" max="36" value="${ac.qtd_parcelas||''}"></div>
+      <div class="field"><label>1ª parcela em</label><input id="ac_inicio" type="month" value="${ps[0]&&ps[0].competencia?ps[0].competencia.slice(0,7):monthStart().slice(0,7)}"></div>
+      <div class="field"><label>Status</label><select id="ac_status">${['ativo','quitado','cancelado'].map(s=>`<option ${ac.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="field" style="grid-column:1/3"><label>Observação</label><input id="ac_obs" value="${esc(ac.observacao||'')}"></div>
+    </div>
+    ${id?`<div class="sec-title">Parcelas</div>${parcelasHtml}
+      <button class="btn ghost sm" style="margin-top:10px" onclick="gerarParcelasAcordo('${id}')">Gerar parcelas (apaga as existentes)</button>`:''}`,
+    `${id?`<button class="btn ghost" onclick="delAcordo('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
+     <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveAcordo('${id||''}')">Salvar</button>`);
+}
+async function saveAcordo(id){
+  const aluno_id=$('ac_aluno').value||null;
+  const aluno_nome=aluno_id?(S.alunos.find(a=>a.id===aluno_id)||{}).nome:null;
+  const rec={ aluno_id, aluno_nome, valor_total:parseMoneyBR($('ac_total').value),
+    qtd_parcelas:+$('ac_qtd').value||null, status:$('ac_status').value, observacao:$('ac_obs').value.trim()||null };
+  let acordoId=id;
+  if(id){ const {error}=await sb.from('acordos').update(rec).eq('id',id); if(error)return toast(error.message,true); }
+  else { const {data,error}=await sb.from('acordos').insert(rec).select().single(); if(error)return toast(error.message,true); acordoId=data.id; }
+  await loadAll(); toast('Acordo salvo.'); modalAcordo(acordoId);
+}
+async function gerarParcelasAcordo(id){
+  const ac=S.acordos.find(x=>x.id===id); if(!ac)return;
+  const qtd=+$('ac_qtd').value||ac.qtd_parcelas; const total=parseMoneyBR($('ac_total').value)||ac.valor_total;
+  const inicio=$('ac_inicio').value; if(!qtd||!total||!inicio)return toast('Preencha valor, nº de parcelas e início.',true);
+  if(!confirm(`Gerar ${qtd} parcelas? As parcelas atuais deste acordo serão substituídas.`))return;
+  await sb.from('acordo_parcelas').delete().eq('acordo_id',id);
+  const valorParc=+(total/qtd).toFixed(2);
+  const rows=[]; for(let i=0;i<qtd;i++){ rows.push({ acordo_id:id, competencia:addMonthsISO(inicio+'-01',i), valor:valorParc, pago:false }); }
+  const {error}=await sb.from('acordo_parcelas').insert(rows); if(error)return toast(error.message,true);
+  await loadAll(); toast(`${qtd} parcelas geradas.`); modalAcordo(id);
+}
+async function pagarParcelaAcordo(parcelaId,acordoId){
+  const {error}=await sb.from('acordo_parcelas').update({pago:true,data_pagamento:todayISO()}).eq('id',parcelaId);
+  if(error)return toast(error.message,true);
+  await loadAll(); toast('Parcela paga.'); modalAcordo(acordoId);
+}
+async function delAcordo(id){ if(!confirm('Excluir este acordo e suas parcelas?'))return;
+  const {error}=await sb.from('acordos').delete().eq('id',id); if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderAcordos(); toast('Acordo excluído.'); }
 
 /* ---------------- CONFIGURAÇÕES ---------------- */
 function renderConfig(){
