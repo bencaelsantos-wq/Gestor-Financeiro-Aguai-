@@ -365,6 +365,7 @@ const NAV_GROUPS=[
     {id:'historico',label:'Histórico',     ic:'∿'},
   ]},
   {title:'Sistema', items:[
+    {id:'relatorios',label:'Relatórios',   ic:'▤'},
     {id:'importar', label:'Importar',      ic:'⇪'},
     {id:'config',   label:'Configurações', ic:'⚙'},
   ]},
@@ -465,7 +466,7 @@ function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCob
   caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig,
   documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas,
   metas:renderMetas,historico:renderHistorico,busca:renderBusca,
-  rematriculas:renderRematriculas,acordos:renderAcordos}[TAB])(); }
+  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -2032,6 +2033,140 @@ async function pagarParcelaAcordo(parcelaId,acordoId){
 async function delAcordo(id){ if(!confirm('Excluir este acordo e suas parcelas?'))return;
   const {error}=await sb.from('acordos').delete().eq('id',id); if(error)return toast(error.message,true);
   closeModal(); await loadAll(); renderAcordos(); toast('Acordo excluído.'); }
+
+/* ---------------- RELATÓRIOS ---------------- */
+let relAno=new Date().getFullYear();
+function relDados(){
+  const ano=relAno; const ini=`${ano}-01-01`, fim=`${ano}-12-31`;
+  const ent=S.lancamentos.filter(l=>l.tipo==='entrada');
+  const sai=S.lancamentos.filter(l=>l.tipo==='saida');
+  // por mês
+  const meses=[...Array(12)].map((_,i)=>{
+    const m0=`${ano}-${String(i+1).padStart(2,'0')}`;
+    const receb=ent.filter(l=>l.status==='pago'&&(l.data_pagamento||'').slice(0,7)===m0).reduce((s,l)=>s+Number(l.valor_pago||l.valor),0);
+    const aRec=ent.filter(l=>(l.competencia||'').slice(0,7)===m0&&l.status!=='pago'&&l.status!=='cancelado').reduce((s,l)=>s+Number(l.valor),0);
+    const desp=sai.filter(l=>l.status==='pago'&&(l.data_pagamento||'').slice(0,7)===m0).reduce((s,l)=>s+Number(l.valor_pago||l.valor),0);
+    return {mes:MESES[i],receb,aRec,desp,result:receb-desp};
+  });
+  const tReceb=meses.reduce((s,m)=>s+m.receb,0);
+  const tDesp=meses.reduce((s,m)=>s+m.desp,0);
+  const tARec=ent.filter(l=>l.status!=='pago'&&l.status!=='cancelado'&&l.vencimento>=todayISO()).reduce((s,l)=>s+Number(l.valor),0);
+  // inadimplência
+  const abertos=ent.filter(l=>l.status==='pendente'&&l.vencimento&&l.vencimento<todayISO());
+  const inad=abertos.reduce((s,l)=>s+Number(l.valor),0);
+  // acadêmico
+  const ativos=S.alunos.filter(a=>a.status==='ativo');
+  const porSeg={}; ativos.forEach(a=>{const k=a.segmento||'—';porSeg[k]=(porSeg[k]||0)+1;});
+  const porPer={}; ativos.forEach(a=>{const k=a.periodo||'—';porPer[k]=(porPer[k]||0)+1;});
+  const porTurma={}; ativos.forEach(a=>{const k=a.agrupada||'—';porTurma[k]=(porTurma[k]||0)+1;});
+  const inclusao=ativos.filter(a=>a.diagnostico||a.laudo||a.inclusao_obs).length;
+  const matric=matriculadosNoAno(ano).length;
+  return {ano,meses,tReceb,tDesp,tResult:tReceb-tDesp,tARec,inad,abertos,ativos:ativos.length,porSeg,porPer,porTurma,inclusao,matric};
+}
+function renderRelatorios(){
+  const d=relDados();
+  const anos=[...new Set(S.alunos.filter(a=>a.data_matricula).map(a=>+a.data_matricula.slice(0,4)).concat(S.lancamentos.map(l=>+(l.competencia||l.vencimento||'').slice(0,4)).filter(Boolean)).concat([new Date().getFullYear()]))].sort();
+  const fin=ADMIN;
+  $('view').innerHTML=head('Indicadores e prestação de contas','Relatórios',
+    `<select onchange="relAno=+this.value;renderRelatorios()" style="padding:7px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface)">${anos.map(y=>`<option ${y===relAno?'selected':''}>${y}</option>`).join('')}</select>
+     <button class="btn ghost sm" onclick="exportRelExcel()">Exportar Excel</button>
+     <button class="btn sm" onclick="exportRelPDF()">Exportar PDF</button>`)
+  +`<div class="kpi-grid">
+      <div class="kpi"><div class="lbl">Alunos ativos</div><div class="val">${d.ativos}</div></div>
+      <div class="kpi"><div class="lbl">Matrículas ${d.ano}</div><div class="val">${d.matric}</div></div>
+      <div class="kpi"><div class="lbl">Em inclusão</div><div class="val">${d.inclusao}</div></div>
+      ${fin?`<div class="kpi accent"><div class="lbl">Resultado ${d.ano}</div><div class="val mono" style="font-size:22px">${fmtBRL(d.tResult)}</div><div class="sub">recebido − despesas</div></div>`:''}
+    </div>`
+  +(fin?`<div class="kpi-grid">
+      <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--ok)"></span>Recebido ${d.ano}</div><div class="val mono" style="font-size:20px">${fmtBRL(d.tReceb)}</div></div>
+      <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--clay)"></span>Despesas ${d.ano}</div><div class="val mono" style="font-size:20px">${fmtBRL(d.tDesp)}</div></div>
+      <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--sage)"></span>A receber (futuro)</div><div class="val mono" style="font-size:20px">${fmtBRL(d.tARec)}</div></div>
+      <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--bad)"></span>Inadimplência</div><div class="val mono" style="font-size:20px">${fmtBRL(d.inad)}</div></div>
+    </div>`:'')
+  +(fin?`<div class="panel"><div class="panel-head"><h2>Demonstrativo mensal · ${d.ano}</h2></div>
+    <table><thead><tr><th>Mês</th><th class="num">Recebido</th><th class="num">A receber</th><th class="num">Despesas</th><th class="num">Resultado</th></tr></thead>
+    <tbody>${d.meses.map(m=>`<tr><td>${m.mes}</td>
+      <td class="num">${fmtNum(m.receb)}</td><td class="num">${fmtNum(m.aRec)}</td>
+      <td class="num">${fmtNum(m.desp)}</td><td class="num" style="color:${m.result>=0?'var(--forest)':'var(--clay)'}">${fmtNum(m.result)}</td></tr>`).join('')}
+      <tr style="font-weight:700;background:var(--surface-2)"><td>Total</td>
+        <td class="num">${fmtNum(d.tReceb)}</td><td class="num">—</td>
+        <td class="num">${fmtNum(d.tDesp)}</td><td class="num">${fmtNum(d.tResult)}</td></tr></tbody></table></div>`:'')
+  +`<div class="grid2-panels">
+    <div class="panel"><div class="panel-head"><h2>Alunos por segmento</h2></div><div class="panel-body" style="padding:14px 18px">${barras(Object.entries(d.porSeg).map(([l,v])=>({l,v,cor:SEG_COR[l]})).sort((a,b)=>b.v-a.v))}</div></div>
+    <div class="panel"><div class="panel-head"><h2>Alunos por período</h2></div><div class="panel-body" style="padding:14px 18px">${barras(Object.entries(d.porPer).map(([l,v])=>({l,v})).sort((a,b)=>b.v-a.v),'var(--amber)')}</div></div>
+    <div class="panel" style="grid-column:1/3"><div class="panel-head"><h2>Alunos por turma</h2></div><div class="panel-body" style="padding:14px 18px">${barras(Object.entries(d.porTurma).map(([l,v])=>({l,v})).sort((a,b)=>a.l.localeCompare(b.l,'pt',{numeric:true})),'var(--forest)')}</div></div>
+  </div>`
+  +(fin?`<div class="panel"><div class="panel-head"><h2>Inadimplência por responsável</h2></div>
+    ${relInadLista().length?`<table><thead><tr><th>Responsável</th><th>Aluno</th><th class="num">Parcelas</th><th>Atraso máx.</th><th class="num">Devido</th></tr></thead>
+    <tbody>${relInadLista().map(r=>`<tr><td><strong>${esc(r.nome)}</strong></td><td>${esc(r.aluno)}</td>
+      <td class="num">${r.n}</td><td>${r.maxDias}d ${r.inad?'<span class="badge bad">inad.</span>':'<span class="badge late">atraso</span>'}</td>
+      <td class="num">${fmtNum(r.total)}</td></tr>`).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">✓</div>Sem inadimplência.</div>`}</div>`:'');
+}
+function relInadLista(){
+  const abertos=S.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente'&&l.vencimento&&l.vencimento<todayISO());
+  const por={};
+  abertos.forEach(l=>{const a=S.alunos.find(x=>x.id===l.aluno_id);const k=a?(a.resp_nome||a.nome):'Sem vínculo';
+    if(!por[k])por[k]={nome:k,aluno:a?a.nome:'—',total:0,n:0,maxDias:0,inad:false};
+    por[k].total+=Number(l.valor);por[k].n++;const dd=daysBetween(todayISO(),l.vencimento);
+    por[k].maxDias=Math.max(por[k].maxDias,dd);if(dd>90)por[k].inad=true;});
+  return Object.values(por).sort((a,b)=>b.total-a.total);
+}
+function exportRelExcel(){
+  if(typeof XLSX==='undefined')return toast('Biblioteca Excel não carregou.',true);
+  const d=relDados(); const wb=XLSX.utils.book_new();
+  if(ADMIN){
+    const fin=[['Mês','Recebido','A receber','Despesas','Resultado'],
+      ...d.meses.map(m=>[m.mes,m.receb,m.aRec,m.desp,m.result]),
+      ['Total',d.tReceb,'',d.tDesp,d.tResult]];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(fin),'Financeiro');
+    const inad=[['Responsável','Aluno','Parcelas','Atraso máx (dias)','Devido'],
+      ...relInadLista().map(r=>[r.nome,r.aluno,r.n,r.maxDias,r.total])];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(inad),'Inadimplência');
+  }
+  const ac=[['Indicador','Valor'],['Alunos ativos',d.ativos],['Matrículas '+d.ano,d.matric],['Em inclusão',d.inclusao],
+    [],['Segmento','Alunos'],...Object.entries(d.porSeg),
+    [],['Período','Alunos'],...Object.entries(d.porPer),
+    [],['Turma','Alunos'],...Object.entries(d.porTurma)];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ac),'Acadêmico');
+  XLSX.writeFile(wb,`Relatorio_Aguai_${d.ano}.xlsx`);
+  toast('Excel exportado.');
+}
+function exportRelPDF(){
+  if(!window.jspdf||!window.jspdf.jsPDF)return toast('Biblioteca PDF não carregou.',true);
+  const d=relDados(); const { jsPDF }=window.jspdf; const doc=new jsPDF({unit:'pt',format:'a4'});
+  const pw=doc.internal.pageSize.getWidth(); let y=54; const m=48;
+  const logo=S.config&&S.config.logo_base64;
+  if(logo){const fmt=logo.includes('png')?'PNG':(logo.includes('jpeg')||logo.includes('jpg')?'JPEG':null);
+    if(fmt){try{const p=doc.getImageProperties(logo);const h=46,w=p.width*(h/p.height);doc.addImage(logo,fmt,(pw-w)/2,y,w,h);y+=h+14;}catch(e){}}}
+  doc.setFont('helvetica','bold');doc.setFontSize(15);doc.setTextColor(43,39,34);
+  doc.text(`${S.config.nome||'Escola'} — Relatório ${d.ano}`,m,y);y+=20;
+  doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(107,98,88);
+  doc.text(`Emitido em ${fmtDate(todayISO())}`,m,y);y+=22;
+  const line=(t,b)=>{doc.setFont('helvetica',b?'bold':'normal');doc.setTextColor(43,39,34);doc.text(t,m,y);y+=15;};
+  line('Indicadores acadêmicos',true);
+  line(`Alunos ativos: ${d.ativos}    Matrículas ${d.ano}: ${d.matric}    Em inclusão: ${d.inclusao}`);
+  y+=4; line('Por segmento: '+Object.entries(d.porSeg).map(([k,v])=>`${k} ${v}`).join('  ·  '));
+  line('Por período: '+Object.entries(d.porPer).map(([k,v])=>`${k} ${v}`).join('  ·  '));
+  y+=10;
+  if(ADMIN){
+    line('Demonstrativo financeiro',true);
+    line(`Recebido: ${fmtBRL(d.tReceb)}    Despesas: ${fmtBRL(d.tDesp)}    Resultado: ${fmtBRL(d.tResult)}`);
+    line(`A receber (futuro): ${fmtBRL(d.tARec)}    Inadimplência: ${fmtBRL(d.inad)}`);
+    y+=8; line('Mês a mês',true);
+    doc.setFontSize(9);
+    doc.text('Mês',m,y);doc.text('Recebido',m+150,y,{align:'right'});doc.text('Despesas',m+260,y,{align:'right'});doc.text('Resultado',m+380,y,{align:'right'});y+=12;
+    d.meses.forEach(mes=>{ if(y>780){doc.addPage();y=54;}
+      doc.setFont('helvetica','normal');doc.setTextColor(43,39,34);
+      doc.text(mes.mes,m,y);doc.text(fmtNum(mes.receb),m+150,y,{align:'right'});
+      doc.text(fmtNum(mes.desp),m+260,y,{align:'right'});doc.text(fmtNum(mes.result),m+380,y,{align:'right'});y+=13;});
+    doc.setFont('helvetica','bold');
+    doc.text('Total',m,y);doc.text(fmtNum(d.tReceb),m+150,y,{align:'right'});
+    doc.text(fmtNum(d.tDesp),m+260,y,{align:'right'});doc.text(fmtNum(d.tResult),m+380,y,{align:'right'});
+  }
+  doc.save(`Relatorio_Aguai_${d.ano}.pdf`);
+  toast('PDF exportado.');
+}
 
 /* ---------------- CONFIGURAÇÕES ---------------- */
 function renderConfig(){
