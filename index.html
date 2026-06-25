@@ -2070,6 +2070,7 @@ function renderRelatorios(){
   $('view').innerHTML=head('Indicadores e prestação de contas','Relatórios',
     `<select onchange="relAno=+this.value;renderRelatorios()" style="padding:7px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface)">${anos.map(y=>`<option ${y===relAno?'selected':''}>${y}</option>`).join('')}</select>
      <button class="btn ghost sm" onclick="exportRelExcel()">Exportar Excel</button>
+     <button class="btn ghost sm" onclick="exportTudoExcel()">Exportar tudo (Excel)</button>
      <button class="btn sm" onclick="exportRelPDF()">Exportar PDF</button>`)
   +`<div class="kpi-grid">
       <div class="kpi"><div class="lbl">Alunos ativos</div><div class="val">${d.ativos}</div></div>
@@ -2166,6 +2167,77 @@ function exportRelPDF(){
   }
   doc.save(`Relatorio_Aguai_${d.ano}.pdf`);
   toast('PDF exportado.');
+}
+
+/* ---------------- EXPORTAR TUDO ---------------- */
+function exportTudoExcel(){
+  if(typeof XLSX==='undefined')return toast('Biblioteca Excel não carregou.',true);
+  const wb=XLSX.utils.book_new();
+  const add=(nome,linhas)=>{ if(linhas&&linhas.length)XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(linhas),nome.slice(0,31)); };
+  const planoNome=id=>{const p=S.planos.find(x=>x.id===id);return p?p.nome:'';};
+
+  // ALUNOS — todas as colunas, nomes amigáveis
+  add('Alunos', S.alunos.map(a=>({
+    Nome:a.nome, Status:a.status, Sexo:a.sexo, Nascimento:a.data_nascimento,
+    RA:a.ra, RG:a.rg, 'Expedição RG':a.rg_expedicao, CPF:a.cpf, 'E-mail escolar':a.email_escolar,
+    Segmento:a.segmento, 'Ano/Série':a.ano_serie, 'Turma agrupada':a.agrupada, Período:a.periodo, Horário:a.horario, Extracurricular:a.extracurricular,
+    Plano:planoNome(a.plano_id), 'Dia vencimento':a.dia_vencimento,
+    CEP:a.cep, Logradouro:a.logradouro, Número:a.numero, Complemento:a.complemento, Bairro:a.bairro, Cidade:a.cidade, Estado:a.estado,
+    'Mãe':a.mae_nome, 'Tel. mãe':a.mae_telefone, 'E-mail mãe':a.mae_email, 'RG mãe':a.mae_rg, 'CPF mãe':a.mae_cpf,
+    'Pai':a.pai_nome, 'Tel. pai':a.pai_telefone, 'E-mail pai':a.pai_email, 'RG pai':a.pai_rg, 'CPF pai':a.pai_cpf,
+    'Resp. financeiro':a.resp_nome, 'CPF resp.':a.resp_cpf, 'Tel. resp.':a.resp_telefone, 'E-mail resp.':a.resp_email,
+    'Parentesco resp.':a.resp_parentesco, 'CEP resp.':a.resp_cep, 'Logradouro resp.':a.resp_logradouro, 'Nº resp.':a.resp_numero,
+    'Compl. resp.':a.resp_complemento, 'Bairro resp.':a.resp_bairro, 'Cidade resp.':a.resp_cidade, 'Estado resp.':a.resp_estado,
+    'Data matrícula':a.data_matricula, 'Como conheceu':a.como_conheceu, 'De onde veio':a.de_onde_veio,
+    'Ano entrada':a.ano_entrada, 'Série entrada':a.serie_entrada, 'Data saída':a.data_saida, 'Escola anterior':a.escola_anterior,
+    Diagnóstico:a.diagnostico, Laudo:a.laudo, 'Obs. inclusão':a.inclusao_obs, 'Currículo adaptado':a.curriculo_adaptado,
+    'Doc Ficha':a.doc_ficha, 'Doc Drive':a.doc_drive, 'Doc Impressa':a.doc_imp, 'Doc Contrato':a.doc_contrato,
+    'Dir. imagem':a.doc_dir_imagem, 'Sec. digital':a.doc_sec_digital, SPTrans:a.doc_sptrans, Celular:a.doc_celular,
+    'Atestado EdF':a.doc_atestado_edf, 'Histórico':a.doc_historico, 'English Stars':a.doc_english_stars, 'Fichário':a.doc_fichario, 'Divisórias':a.doc_divisorias,
+    // proposta financeira
+    'Prop. tipo':a.prop_modo, 'Prop. 1ª parcela':a.prop_primeira_parcela, 'Prop. modo 1ª':a.prop_primeira_modo,
+    'Prop. 12x':a.prop_12x, 'Prop. modo 12x':a.prop_12x_modo, 'Prop. taxa':a.prop_taxa,
+    'Prop. valor bruto':a.prop_valor_bruto, 'Prop. desconto':a.prop_desconto, 'Prop. valor total':a.prop_valor_total, 'Prop. vencimento':a.prop_vencimento,
+  })));
+
+  // ACADÊMICO sempre; FINANCEIRO só admin
+  if(ADMIN){
+    add('Cobranças e pagamentos', S.lancamentos.map(l=>({
+      Aluno:alunoNome(l.aluno_id), Tipo:l.tipo, Categoria:catNome(l.categoria_id), Descrição:l.descricao,
+      Competência:l.competencia, Vencimento:l.vencimento, Valor:l.valor, Status:statusReal(l),
+      'Valor pago':l.valor_pago, 'Data pagamento':l.data_pagamento, Forma:l.forma_pagamento, Multa:l.multa, Juros:l.juros, Origem:l.origem,
+    })));
+    add('Cobranças extras', S.cobrancas.map(c=>({
+      Aluno:alunoNome(c.aluno_id), Descrição:c.descricao, Categoria:catNome(c.categoria_id),
+      Valor:c.valor, Recorrente:c.recorrente?'sim':'não', 'Dia vencimento':c.dia_vencimento, Ativo:c.ativo?'sim':'não',
+    })));
+    add('Descontos e bolsas', S.descontos.map(d=>({
+      Aluno:alunoNome(d.aluno_id), Descrição:d.descricao, Tipo:d.tipo, Valor:d.valor, Ativo:d.ativo?'sim':'não',
+    })));
+    add('Planos', S.planos.map(p=>({ Plano:p.nome, Período:p.periodo, Mensalidade:p.valor_mensalidade, Matrícula:p.valor_matricula })));
+    add('Funcionários', S.funcionarios.map(f=>({ Nome:f.nome, Cargo:f.cargo, Salário:f.salario, 'Dia pgto':f.dia_pagamento, Ativo:f.ativo?'sim':'não' })));
+    add('Despesas fixas', S.despesasFixas.map(d=>({ Descrição:d.descricao, Categoria:catNome(d.categoria_id), Valor:d.valor, 'Dia venc.':d.dia_vencimento, Ativa:d.ativo?'sim':'não' })));
+    add('Rematrículas', S.rematriculas.map(r=>({
+      Aluno:r.aluno_nome||alunoNome(r.aluno_id), Ano:r.ano_letivo, Período:r.periodo, 'Ano/Série':r.ano_serie,
+      'Valor anterior':r.valor_2025, 'Reajuste %':r.porcentagem, 'Valor final':r.valor_final, 'Valor adicional':r.valor_adicional,
+      Aceite:r.aceite?'sim':'não', 'Data aceite':r.data_aceite, 'Forma pgto':r.forma_pg, 'Feito em':r.feito_em,
+    })));
+    add('Acordos', S.acordos.map(ac=>({
+      Aluno:ac.aluno_nome||alunoNome(ac.aluno_id), 'Valor total':ac.valor_total, Parcelas:ac.qtd_parcelas, Status:ac.status, Observação:ac.observacao,
+    })));
+    add('Acordo parcelas', S.acordoParcelas.map(p=>{const ac=S.acordos.find(x=>x.id===p.acordo_id);return {
+      Aluno:ac?(ac.aluno_nome||alunoNome(ac.aluno_id)):'', Competência:p.competencia, Valor:p.valor, Pago:p.pago?'sim':'não', 'Data pagamento':p.data_pagamento,
+    };}));
+  }
+  // Metas (acadêmico)
+  add('Metas', S.metas.map(m=>({
+    Competência:m.competencia, 'Procura esperada':m.procura_esperada, 'Procura real':m.procura_real, 'Matríc. esperada':m.matric_esperada,
+  })));
+
+  if(wb.SheetNames.length===0)return toast('Nada para exportar.',true);
+  const hoje=todayISO();
+  XLSX.writeFile(wb,`Aguai_Base_Completa_${hoje}.xlsx`);
+  toast('Planilha completa exportada.');
 }
 
 /* ---------------- CONFIGURAÇÕES ---------------- */
