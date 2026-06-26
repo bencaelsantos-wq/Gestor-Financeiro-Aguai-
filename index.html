@@ -353,6 +353,7 @@ const NAV_GROUPS=[
     {id:'rematriculas',label:'Rematrícula', ic:'↻'},
     {id:'acordos',  label:'Acordos',       ic:'≈'},
     {id:'matriculas',label:'Matrículas',   ic:'✎'},
+    {id:'custos',   label:'Custos e margem',ic:'◔'},
   ]},
   {title:'Acadêmico', items:[
     {id:'alunos',   label:'Alunos',        ic:'❑'},
@@ -472,7 +473,7 @@ function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCob
   caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig,
   documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas,
   metas:renderMetas,historico:renderHistorico,busca:renderBusca,
-  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios,matriculas:renderMatriculas,captacao:renderCaptacao}[TAB])(); }
+  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios,matriculas:renderMatriculas,captacao:renderCaptacao,custos:renderCustos}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -1094,6 +1095,7 @@ function modalFuncionario(id){
       <div class="field"><label>Cargo</label><input id="fu_cargo" value="${esc(f.cargo||'')}"></div>
       <div class="field"><label>Salário</label><input id="fu_sal" class="mono" value="${f.salario?fmtNum(f.salario):''}"></div>
       <div class="field"><label>Dia de pagamento</label><input id="fu_dia" type="number" min="1" max="31" value="${f.dia_pagamento||5}"></div>
+      <div class="field"><label>Ciclo que atende</label><select id="fu_ciclo"><option value="">Rateio geral</option>${['Educação Infantil','Fundamental I','Fundamental II','Ensino Médio'].map(s=>`<option ${f.ciclo===s?'selected':''}>${s}</option>`).join('')}</select></div>
       <div class="field"><label>Status</label><select id="fu_ativo"><option value="true" ${f.ativo!==false?'selected':''}>Ativo</option><option value="false" ${f.ativo===false?'selected':''}>Inativo</option></select></div>
     </div>`,
     `${id?`<button class="btn ghost" onclick="delFuncionario('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
@@ -1103,7 +1105,7 @@ function modalFuncionario(id){
 async function saveFuncionario(id){
   const nome=$('fu_nome').value.trim(); if(!nome)return toast('Informe o nome.',true);
   const rec={ nome, cargo:$('fu_cargo').value.trim()||null, salario:parseMoneyBR($('fu_sal').value)||0,
-    dia_pagamento:+$('fu_dia').value||5, ativo:$('fu_ativo').value==='true' };
+    dia_pagamento:+$('fu_dia').value||5, ativo:$('fu_ativo').value==='true', ciclo:$('fu_ciclo')?($('fu_ciclo').value||null):null };
   const q=id?sb.from('funcionarios').update(rec).eq('id',id):sb.from('funcionarios').insert(rec);
   const {error}=await q; if(error)return toast(error.message,true);
   closeModal(); await loadAll(); renderDespesas(); toast('Funcionário salvo.');
@@ -2413,6 +2415,103 @@ async function converterCaptacao(id){
   const {error}=await sb.from('alunos').insert(rec); if(error)return toast(error.message,true);
   await sb.from('captacao').update({status:'matriculado'}).eq('id',id);
   closeModal(); await loadAll(); renderCaptacao(); toast('Aluno criado a partir do lead.');
+}
+
+/* ---------------- CUSTOS E MARGEM ---------------- */
+let custoAno=new Date().getFullYear();
+function mensalAluno(a){
+  if(a.prop_valor_total)return Number(a.prop_valor_total);
+  const p=planoDe(a); if(p&&p.valor_mensalidade)return aplicarDescontos(p.valor_mensalidade,a.id);
+  return 0;
+}
+function renderCustos(){
+  const CICLOS=['Educação Infantil','Fundamental I','Fundamental II','Ensino Médio'];
+  const ativos=S.alunos.filter(a=>a.status==='ativo');
+  // faturamento mensal por ciclo (soma das mensalidades)
+  const fatCiclo={}, nCiclo={};
+  CICLOS.forEach(c=>{fatCiclo[c]=0;nCiclo[c]=0;});
+  let fatOutro=0,nOutro=0;
+  ativos.forEach(a=>{const c=a.segmento;const v=mensalAluno(a);
+    if(CICLOS.includes(c)){fatCiclo[c]+=v;nCiclo[c]++;}else{fatOutro+=v;nOutro++;}});
+  const fatTotal=Object.values(fatCiclo).reduce((s,v)=>s+v,0)+fatOutro;
+  // custos: folha por ciclo + rateio geral + despesas fixas (rateadas)
+  const folhaCiclo={}; CICLOS.forEach(c=>folhaCiclo[c]=0);
+  let folhaGeral=0;
+  S.funcionarios.filter(f=>f.ativo).forEach(f=>{const c=f.ciclo;const s=Number(f.salario||0);
+    if(CICLOS.includes(c))folhaCiclo[c]+=s;else folhaGeral+=s;});
+  const fixasTot=S.despesasFixas.filter(d=>d.ativo).reduce((s,d)=>s+Number(d.valor),0);
+  const totAlunos=ativos.length||1;
+  // rateio geral (folha sem ciclo + contas fixas) proporcional ao nº de alunos do ciclo
+  const rateioPorAluno=(folhaGeral+fixasTot)/totAlunos;
+  const custoCiclo={}; CICLOS.forEach(c=>custoCiclo[c]=folhaCiclo[c]+rateioPorAluno*nCiclo[c]);
+  const custoTotal=Object.values(custoCiclo).reduce((s,v)=>s+v,0)+rateioPorAluno*nOutro+Object.values(folhaCiclo).reduce((a,b)=>0,0);
+  const custoMensalTotal=S.funcionarios.filter(f=>f.ativo).reduce((s,f)=>s+Number(f.salario||0),0)+fixasTot;
+  const margem=fatTotal-custoMensalTotal;
+  const margemPct=fatTotal?Math.round(margem/fatTotal*100):0;
+
+  $('view').innerHTML=head('Custos e margem (mensal)','Custos e margem')
+  +`<div class="kpi-grid">
+    <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--ok)"></span>Faturamento/mês</div><div class="val mono" style="font-size:20px">${fmtBRL(fatTotal)}</div><div class="sub">${ativos.length} alunos ativos</div></div>
+    <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--clay)"></span>Custo/mês</div><div class="val mono" style="font-size:20px">${fmtBRL(custoMensalTotal)}</div><div class="sub">folha + contas fixas</div></div>
+    <div class="kpi accent"><div class="lbl">Margem/mês</div><div class="val mono" style="font-size:20px">${fmtBRL(margem)}</div><div class="sub">${margemPct}% do faturamento</div></div>
+    <div class="kpi"><div class="lbl">Custo por aluno</div><div class="val mono" style="font-size:20px">${fmtBRL(custoMensalTotal/totAlunos)}</div></div>
+  </div>`
+  +`<div class="panel"><div class="panel-head"><h2>Margem por ciclo (mensal)</h2>
+      <span style="font-size:12px;color:var(--ink-soft)">marque o ciclo nos funcionários para precisão</span></div>
+    <table><thead><tr><th>Ciclo</th><th class="num">Alunos</th><th class="num">Faturamento</th><th class="num">Custo estimado</th><th class="num">Margem</th><th class="num">Por aluno</th></tr></thead>
+    <tbody>${CICLOS.map(c=>{const fat=fatCiclo[c],cus=custoCiclo[c],mg=fat-cus;return `<tr>
+      <td><strong>${c}</strong></td><td class="num">${nCiclo[c]}</td>
+      <td class="num">${fmtNum(fat)}</td><td class="num">${fmtNum(cus)}</td>
+      <td class="num" style="color:${mg>=0?'var(--forest)':'var(--clay)'}">${fmtNum(mg)}</td>
+      <td class="num">${nCiclo[c]?fmtNum(cus/nCiclo[c]):'—'}</td></tr>`;}).join('')}
+      ${nOutro?`<tr><td><strong>Sem ciclo definido</strong></td><td class="num">${nOutro}</td><td class="num">${fmtNum(fatOutro)}</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`:''}
+    </tbody></table>
+    <p class="aging-note" style="padding:10px 20px">Custo = folha do ciclo + rateio das contas fixas e da folha geral por nº de alunos. Quanto mais funcionários tiverem o ciclo marcado, mais preciso fica.</p>
+  </div>`
+  +renderProjecao();
+}
+function renderProjecao(){
+  const ano=custoAno;
+  const ent=S.lancamentos.filter(l=>l.tipo==='entrada');
+  const sai=S.lancamentos.filter(l=>l.tipo==='saida');
+  const hoje=todayISO();
+  const meses=[...Array(12)].map((_,i)=>{
+    const mm=`${ano}-${String(i+1).padStart(2,'0')}`;
+    const receb=ent.filter(l=>l.status==='pago'&&(l.data_pagamento||'').slice(0,7)===mm).reduce((s,l)=>s+Number(l.valor_pago||l.valor),0);
+    const prev=ent.filter(l=>(l.competencia||'').slice(0,7)===mm).reduce((s,l)=>s+Number(l.valor),0);
+    const desp=sai.filter(l=>l.status==='pago'&&(l.data_pagamento||'').slice(0,7)===mm).reduce((s,l)=>s+Number(l.valor_pago||l.valor),0);
+    const despPrev=sai.filter(l=>(l.competencia||'').slice(0,7)===mm).reduce((s,l)=>s+Number(l.valor),0);
+    return {m:MESES[i].slice(0,3),receb,prev,desp,despPrev,fut:mm>hoje.slice(0,7)};
+  });
+  const maxV=Math.max(1,...meses.flatMap(x=>[x.prev,x.despPrev]));
+  const recebAcum=meses.reduce((s,m)=>s+m.receb,0);
+  const previstoAno=meses.reduce((s,m)=>s+m.prev,0);
+  const despAno=meses.reduce((s,m)=>s+m.despPrev,0);
+  const projResultado=previstoAno-despAno;
+  return `<div class="panel"><div class="panel-head"><h2>Situação e projeção · ${ano}</h2>
+      <select onchange="custoAno=+this.value;renderCustos()" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)">
+        ${[ano-1,ano,ano+1].map(y=>`<option ${y===ano?'selected':''}>${y}</option>`).join('')}</select></div>
+    <div class="panel-body" style="padding:18px 20px">
+      <div class="kpi-grid" style="margin-bottom:18px">
+        <div class="kpi" style="box-shadow:none"><div class="lbl">Recebido até hoje</div><div class="val mono" style="font-size:18px">${fmtBRL(recebAcum)}</div></div>
+        <div class="kpi" style="box-shadow:none"><div class="lbl">Previsto no ano</div><div class="val mono" style="font-size:18px">${fmtBRL(previstoAno)}</div></div>
+        <div class="kpi" style="box-shadow:none"><div class="lbl">Despesa prevista</div><div class="val mono" style="font-size:18px">${fmtBRL(despAno)}</div></div>
+        <div class="kpi accent" style="box-shadow:none"><div class="lbl">Resultado projetado</div><div class="val mono" style="font-size:18px">${fmtBRL(projResultado)}</div></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-end;height:180px;border-bottom:1px solid var(--line);padding-bottom:4px">
+        ${meses.map(x=>`<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center">
+          <div style="display:flex;gap:3px;align-items:flex-end;justify-content:center;height:150px;opacity:${x.fut?0.5:1}">
+            <div title="Receita ${x.fut?'prevista':'recebida'} ${fmtBRL(x.fut?x.prev:x.receb)}" style="width:11px;background:var(--sage);border-radius:3px 3px 0 0;height:${Math.max(2,(x.fut?x.prev:x.receb)/maxV*150)}px"></div>
+            <div title="Despesa ${fmtBRL(x.fut?x.despPrev:x.desp)}" style="width:11px;background:var(--clay);border-radius:3px 3px 0 0;height:${Math.max(2,(x.fut?x.despPrev:x.desp)/maxV*150)}px"></div>
+          </div>
+          <div style="font-size:10px;color:var(--ink-soft);margin-top:5px">${x.m}</div></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:18px;margin-top:12px;font-size:12px;color:var(--ink-soft)">
+        <span><span class="dot" style="background:var(--sage)"></span> Receita</span>
+        <span><span class="dot" style="background:var(--clay)"></span> Despesa</span>
+        <span style="margin-left:auto">Meses futuros aparecem mais claros (projeção)</span>
+      </div>
+    </div></div>`;
 }
 
 /* ---------------- CONFIGURAÇÕES ---------------- */
