@@ -352,6 +352,7 @@ const NAV_GROUPS=[
     {id:'inadimp',  label:'Inadimplência', ic:'⚠'},
     {id:'rematriculas',label:'Rematrícula', ic:'↻'},
     {id:'acordos',  label:'Acordos',       ic:'≈'},
+    {id:'matriculas',label:'Matrículas',   ic:'✎'},
   ]},
   {title:'Acadêmico', items:[
     {id:'alunos',   label:'Alunos',        ic:'❑'},
@@ -424,6 +425,8 @@ async function loadAll(){
     S.planos=planos.data||[]; S.categorias=cats.data||[];
     S.alunos=alunos.data||[]; S.lancamentos=lanc.data||[];
     S.cobrancas=cobr.data||[]; S.funcionarios=func.data||[]; S.despesasFixas=despf.data||[]; S.descontos=desc.data||[]; S.usuarios=usrs.data||[]; S.metas=metas.data||[]; S.rematriculas=remat.data||[]; S.acordos=acord.data||[]; S.acordoParcelas=acordParc.data||[];
+    const [mtr,mtrP]=await Promise.all([sb.from('matriculas').select('*').order('created_at',{ascending:false}),sb.from('matricula_parcelas').select('*').order('competencia')]);
+    S.matriculas=mtr.data||[]; S.matriculaParcelas=mtrP.data||[];
     if(lanc.error) throw lanc.error;
   }catch(e){ toast('Erro ao carregar: '+(e.message||e),true); console.error(e); }
 }
@@ -466,7 +469,7 @@ function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCob
   caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig,
   documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas,
   metas:renderMetas,historico:renderHistorico,busca:renderBusca,
-  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios}[TAB])(); }
+  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios,matriculas:renderMatriculas}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -2239,6 +2242,88 @@ function exportTudoExcel(){
   XLSX.writeFile(wb,`Aguai_Base_Completa_${hoje}.xlsx`);
   toast('Planilha completa exportada.');
 }
+
+/* ---------------- MATRÍCULAS (taxa) ---------------- */
+function renderMatriculas(){
+  const lista=[...(S.matriculas||[])].sort((a,b)=>(a.aluno_nome||'').localeCompare(b.aluno_nome||''));
+  const tot=lista.reduce((s,m)=>s+Number(m.valor_total||0),0);
+  const parc=S.matriculaParcelas||[];
+  const pagas=parc.filter(p=>p.pago).reduce((s,p)=>s+Number(p.valor||0),0);
+  const aberto=parc.filter(p=>!p.pago).reduce((s,p)=>s+Number(p.valor||0),0);
+  $('view').innerHTML=head('Cronograma da taxa de matrícula','Matrículas',
+    `<button class="btn sm" onclick="modalMatricula()">+ Matrícula</button>`)
+  +`<div class="kpi-grid">
+      <div class="kpi"><div class="lbl">Matrículas</div><div class="val">${lista.length}</div></div>
+      <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--ok)"></span>Pago</div><div class="val mono" style="font-size:20px">${fmtBRL(pagas)}</div></div>
+      <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--warn)"></span>Em aberto</div><div class="val mono" style="font-size:20px">${fmtBRL(aberto)}</div></div>
+    </div>
+    <div class="panel">
+    ${lista.length?`<table><thead><tr><th>Aluno</th><th>Forma</th><th class="num">Valor</th><th class="num">Parcelas</th><th class="num">Pagas</th><th></th></tr></thead>
+    <tbody>${lista.map(m=>{const ps=parc.filter(p=>p.matricula_id===m.id);const np=ps.filter(p=>p.pago).length;return `<tr>
+      <td><strong>${esc(m.aluno_nome||alunoNome(m.aluno_id))}</strong></td>
+      <td style="font-size:12px">${esc(m.forma||'—')}</td>
+      <td class="num">${m.valor_total?fmtNum(m.valor_total):'—'}</td>
+      <td class="num">${ps.length}</td><td class="num">${np}/${ps.length}</td>
+      <td><div class="row-acts"><button class="icon-btn" onclick="modalMatricula('${m.id}')">Abrir</button></div></td></tr>`;}).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">✎</div>Nenhuma matrícula registrada.</div>`}
+  </div>`;
+}
+function modalMatricula(id){
+  const m=id?S.matriculas.find(x=>x.id===id):{status:'ativo'};
+  const aluOpts=S.alunos.map(a=>`<option value="${a.id}" ${m.aluno_id===a.id?'selected':''}>${esc(a.nome)}</option>`).join('');
+  const ps=id?(S.matriculaParcelas||[]).filter(p=>p.matricula_id===id).sort((a,b)=>(a.competencia||'').localeCompare(b.competencia||'')):[];
+  const parcelasHtml=id?(ps.length?`<table style="margin-top:8px"><thead><tr><th>Competência</th><th class="num">Valor</th><th>Pago</th><th></th></tr></thead>
+    <tbody>${ps.map(p=>`<tr><td>${p.competencia?compLabel(p.competencia):'—'}</td>
+      <td class="num">${p.valor?fmtNum(p.valor):'—'}</td>
+      <td>${p.pago?'<span class="badge ok">pago '+(p.data_pagamento?fmtDate(p.data_pagamento):'')+'</span>':'<span class="badge pend">em aberto</span>'}</td>
+      <td><div class="row-acts">${p.pago?`<button class="icon-btn" onclick="desfazerParcelaMatricula('${p.id}','${id}')">Desfazer</button>`:`<button class="icon-btn pay" onclick="pagarParcelaMatricula('${p.id}','${id}')">Pagar</button>`}</div></td></tr>`).join('')}</tbody></table>`
+    :'<p class="aging-note">Sem parcelas. Gere abaixo.</p>'):'<p class="aging-note">Salve a matrícula primeiro para gerar as parcelas.</p>';
+  openModal(id?'Matrícula':'Nova matrícula',`
+    <div class="grid2">
+      <div class="field" style="grid-column:1/3"><label>Aluno</label><select id="mt_aluno"><option value="">—</option>${aluOpts}</select></div>
+      <div class="field"><label>Valor total da matrícula (R$)</label><input id="mt_total" class="mono" value="${m.valor_total?fmtNum(m.valor_total):''}"></div>
+      <div class="field"><label>Forma</label><input id="mt_forma" value="${esc(m.forma||'')}" placeholder="Cartão / Boleto"></div>
+      <div class="field"><label>Nº de parcelas</label><input id="mt_qtd" type="number" min="1" max="18" value="${m.qtd_parcelas||''}"></div>
+      <div class="field"><label>1ª parcela em</label><input id="mt_inicio" type="month" value="${ps[0]&&ps[0].competencia?ps[0].competencia.slice(0,7):monthStart().slice(0,7)}"></div>
+      <div class="field"><label>Status</label><select id="mt_status">${['ativo','quitado','cancelado'].map(s=>`<option ${m.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    </div>
+    ${id?`<div class="sec-title">Parcelas</div>${parcelasHtml}
+      <button class="btn ghost sm" style="margin-top:10px" onclick="gerarParcelasMatricula('${id}')">Gerar parcelas (apaga as existentes)</button>`:''}`,
+    `${id?`<button class="btn ghost" onclick="delMatricula('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
+     <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveMatricula('${id||''}')">Salvar</button>`);
+}
+async function saveMatricula(id){
+  const aluno_id=$('mt_aluno').value||null;
+  const aluno_nome=aluno_id?(S.alunos.find(a=>a.id===aluno_id)||{}).nome:null;
+  const rec={ aluno_id, aluno_nome, valor_total:parseMoneyBR($('mt_total').value), forma:$('mt_forma').value.trim()||null,
+    qtd_parcelas:+$('mt_qtd').value||null, status:$('mt_status').value };
+  let mid=id;
+  if(id){ const {error}=await sb.from('matriculas').update(rec).eq('id',id); if(error)return toast(error.message,true); }
+  else { const {data,error}=await sb.from('matriculas').insert(rec).select().single(); if(error)return toast(error.message,true); mid=data.id; }
+  await loadAll(); toast('Matrícula salva.'); modalMatricula(mid);
+}
+async function gerarParcelasMatricula(id){
+  const qtd=+$('mt_qtd').value, total=parseMoneyBR($('mt_total').value), inicio=$('mt_inicio').value;
+  if(!qtd||!total||!inicio)return toast('Preencha valor, nº de parcelas e início.',true);
+  if(!confirm(`Gerar ${qtd} parcelas? As atuais serão substituídas.`))return;
+  await sb.from('matricula_parcelas').delete().eq('matricula_id',id);
+  const vp=+(total/qtd).toFixed(2);
+  const rows=[]; for(let i=0;i<qtd;i++)rows.push({matricula_id:id,competencia:addMonthsISO(inicio+'-01',i),valor:vp,pago:false});
+  const {error}=await sb.from('matricula_parcelas').insert(rows); if(error)return toast(error.message,true);
+  await loadAll(); toast(`${qtd} parcelas geradas.`); modalMatricula(id);
+}
+async function pagarParcelaMatricula(pid,mid){
+  const {error}=await sb.from('matricula_parcelas').update({pago:true,data_pagamento:todayISO()}).eq('id',pid);
+  if(error)return toast(error.message,true); await loadAll(); toast('Parcela paga.'); modalMatricula(mid);
+}
+async function desfazerParcelaMatricula(pid,mid){
+  const {error}=await sb.from('matricula_parcelas').update({pago:false,data_pagamento:null}).eq('id',pid);
+  if(error)return toast(error.message,true); await loadAll(); toast('Pagamento desfeito.'); modalMatricula(mid);
+}
+async function delMatricula(id){ if(!confirm('Excluir esta matrícula e suas parcelas?'))return;
+  const {error}=await sb.from('matriculas').delete().eq('id',id); if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderMatriculas(); toast('Matrícula excluída.'); }
 
 /* ---------------- CONFIGURAÇÕES ---------------- */
 function renderConfig(){
