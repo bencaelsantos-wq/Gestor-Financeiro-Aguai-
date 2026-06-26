@@ -364,6 +364,7 @@ const NAV_GROUPS=[
     {id:'busca',    label:'Busca avançada',ic:'⚲'},
     {id:'metas',    label:'Metas',         ic:'◎'},
     {id:'historico',label:'Histórico',     ic:'∿'},
+    {id:'captacao', label:'Captação',      ic:'➚'},
   ]},
   {title:'Sistema', items:[
     {id:'relatorios',label:'Relatórios',   ic:'▤'},
@@ -427,6 +428,8 @@ async function loadAll(){
     S.cobrancas=cobr.data||[]; S.funcionarios=func.data||[]; S.despesasFixas=despf.data||[]; S.descontos=desc.data||[]; S.usuarios=usrs.data||[]; S.metas=metas.data||[]; S.rematriculas=remat.data||[]; S.acordos=acord.data||[]; S.acordoParcelas=acordParc.data||[];
     const [mtr,mtrP]=await Promise.all([sb.from('matriculas').select('*').order('created_at',{ascending:false}),sb.from('matricula_parcelas').select('*').order('competencia')]);
     S.matriculas=mtr.data||[]; S.matriculaParcelas=mtrP.data||[];
+    const {data:cap}=await sb.from('captacao').select('*').order('created_at',{ascending:false});
+    S.captacao=cap||[];
     if(lanc.error) throw lanc.error;
   }catch(e){ toast('Erro ao carregar: '+(e.message||e),true); console.error(e); }
 }
@@ -469,7 +472,7 @@ function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCob
   caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig,
   documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas,
   metas:renderMetas,historico:renderHistorico,busca:renderBusca,
-  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios,matriculas:renderMatriculas}[TAB])(); }
+  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios,matriculas:renderMatriculas,captacao:renderCaptacao}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -2324,6 +2327,93 @@ async function desfazerParcelaMatricula(pid,mid){
 async function delMatricula(id){ if(!confirm('Excluir esta matrícula e suas parcelas?'))return;
   const {error}=await sb.from('matriculas').delete().eq('id',id); if(error)return toast(error.message,true);
   closeModal(); await loadAll(); renderMatriculas(); toast('Matrícula excluída.'); }
+
+/* ---------------- CAPTAÇÃO (funil) ---------------- */
+let capStatus='';
+const CAP_STATUS=['lead','em andamento','matriculado','desistiu'];
+function renderCaptacao(){
+  let lista=[...(S.captacao||[])];
+  if(capStatus)lista=lista.filter(c=>(c.status||'lead')===capStatus);
+  lista.sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+  const cont=s=>(S.captacao||[]).filter(c=>(c.status||'lead')===s).length;
+  const totMatric=(S.captacao||[]).filter(c=>c.status==='matriculado').length;
+  const totLeads=(S.captacao||[]).length;
+  const conv=totLeads?Math.round(totMatric/totLeads*100):0;
+  $('view').innerHTML=head('Funil de novos alunos','Captação',
+    `<button class="btn sm" onclick="modalCaptacao()">+ Lead</button>`)
+  +`<div class="kpi-grid">
+      <div class="kpi"><div class="lbl">Total no funil</div><div class="val">${totLeads}</div></div>
+      <div class="kpi"><div class="lbl">Matriculados</div><div class="val">${totMatric}</div></div>
+      <div class="kpi accent"><div class="lbl">Conversão</div><div class="val">${conv}%</div></div>
+    </div>
+    <div class="panel">
+    <div class="filters">
+      <button class="btn sm ${capStatus===''?'':'ghost'}" onclick="capStatus='';renderCaptacao()">Todos</button>
+      ${CAP_STATUS.map(s=>`<button class="btn sm ${capStatus===s?'':'ghost'}" onclick="capStatus='${s}';renderCaptacao()">${s} (${cont(s)})</button>`).join('')}
+      <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${lista.length} leads</span>
+    </div>
+    ${lista.length?`<table><thead><tr><th>Nome</th><th>Resp./Atendente</th><th>Escola anterior</th><th>Status</th><th class="num">1ª parc.</th><th class="num">Mensal.</th><th></th></tr></thead>
+    <tbody>${lista.map(c=>`<tr>
+      <td><strong>${esc(c.nome)}</strong>${c.ano_serie?`<div style="font-size:12px;color:var(--ink-soft)">${esc(c.ano_serie)}</div>`:''}</td>
+      <td style="font-size:12px">${esc(c.responsavel||c.atendente||'—')}</td>
+      <td style="font-size:12px">${esc(c.escola_anterior||'—')}</td>
+      <td>${badgeCap(c.status)}</td>
+      <td class="num">${c.primeira_parcela?fmtNum(c.primeira_parcela):'—'}</td>
+      <td class="num">${c.mensalidade?fmtNum(c.mensalidade):'—'}</td>
+      <td><div class="row-acts"><button class="icon-btn" onclick="modalCaptacao('${c.id}')">Abrir</button></div></td></tr>`).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">➚</div>Nenhum lead neste filtro.</div>`}
+  </div>`;
+}
+function badgeCap(s){return {lead:'<span class="badge muted">lead</span>','em andamento':'<span class="badge pend">em andamento</span>',matriculado:'<span class="badge ok">matriculado</span>',desistiu:'<span class="badge bad">desistiu</span>'}[s||'lead']||esc(s);}
+function modalCaptacao(id){
+  const c=id?S.captacao.find(x=>x.id===id):{status:'lead'};
+  const F=(k,lbl,type='text')=>`<div class="field"><label>${lbl}</label><input id="cap_${k}" type="${type}" value="${esc(c[k]==null?'':c[k])}"></div>`;
+  openModal(id?'Lead / captação':'Novo lead',`
+    <div class="grid2">
+      <div class="field" style="grid-column:1/3"><label>Nome *</label><input id="cap_nome" value="${esc(c.nome||'')}"></div>
+      ${F('responsavel','Responsável')}
+      ${F('ano_serie','Ano / série pretendido')}
+      ${F('escola_anterior','Escola anterior')}
+      ${F('atendente','Atendente')}
+      <div class="field"><label>Status</label><select id="cap_status">${CAP_STATUS.map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      ${F('situacao','Situação (texto livre)')}
+      ${F('primeira_parcela','1ª parcela (R$)')}
+      ${F('mensalidade','Mensalidade (R$)')}
+      ${F('matricula','Matrícula (R$)')}
+      ${F('comissao','Comissão (R$)')}
+      ${F('data_matricula','Data matrícula','date')}
+      ${F('laudo','Laudo')}
+      <div class="field" style="grid-column:1/3"><label>Observações</label><input id="cap_obs" value="${esc(c.obs||'')}"></div>
+    </div>`,
+    `${id?`<button class="btn ghost" onclick="delCaptacao('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>
+      <button class="btn ghost" onclick="converterCaptacao('${id}')">Virar aluno</button>`:''}
+     <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveCaptacao('${id||''}')">Salvar</button>`);
+}
+async function saveCaptacao(id){
+  const nome=$('cap_nome').value.trim(); if(!nome)return toast('Informe o nome.',true);
+  const v=k=>{const e=$('cap_'+k);return e?(e.value.trim?e.value.trim():e.value)||null:null;};
+  const rec={ nome, responsavel:v('responsavel'), ano_serie:v('ano_serie'), escola_anterior:v('escola_anterior'),
+    atendente:v('atendente'), status:$('cap_status').value, situacao:v('situacao'),
+    primeira_parcela:parseMoneyBR(v('primeira_parcela')), mensalidade:parseMoneyBR(v('mensalidade')),
+    matricula:parseMoneyBR(v('matricula')), comissao:parseMoneyBR(v('comissao')),
+    data_matricula:$('cap_data_matricula').value||null, laudo:v('laudo'), obs:v('obs') };
+  const q=id?sb.from('captacao').update(rec).eq('id',id):sb.from('captacao').insert(rec);
+  const {error}=await q; if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderCaptacao(); toast('Lead salvo.');
+}
+async function delCaptacao(id){ if(!confirm('Excluir este lead?'))return;
+  const {error}=await sb.from('captacao').delete().eq('id',id); if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderCaptacao(); toast('Lead excluído.'); }
+async function converterCaptacao(id){
+  const c=S.captacao.find(x=>x.id===id); if(!c)return;
+  if(!confirm(`Criar um aluno a partir de "${c.nome}"?`))return;
+  const rec={ nome:c.nome, status:'ativo', ano_serie:c.ano_serie, escola_anterior:c.escola_anterior,
+    resp_nome:c.responsavel, data_matricula:c.data_matricula||todayISO(), laudo:c.laudo };
+  const {error}=await sb.from('alunos').insert(rec); if(error)return toast(error.message,true);
+  await sb.from('captacao').update({status:'matriculado'}).eq('id',id);
+  closeModal(); await loadAll(); renderCaptacao(); toast('Aluno criado a partir do lead.');
+}
 
 /* ---------------- CONFIGURAÇÕES ---------------- */
 function renderConfig(){
