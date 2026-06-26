@@ -354,6 +354,7 @@ const NAV_GROUPS=[
     {id:'acordos',  label:'Acordos',       ic:'≈'},
     {id:'matriculas',label:'Matrículas',   ic:'✎'},
     {id:'custos',   label:'Custos e margem',ic:'◔'},
+    {id:'informeir',label:'Informe IR',    ic:'§'},
   ]},
   {title:'Acadêmico', items:[
     {id:'alunos',   label:'Alunos',        ic:'❑'},
@@ -473,7 +474,7 @@ function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCob
   caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig,
   documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas,
   metas:renderMetas,historico:renderHistorico,busca:renderBusca,
-  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios,matriculas:renderMatriculas,captacao:renderCaptacao,custos:renderCustos}[TAB])(); }
+  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios,matriculas:renderMatriculas,captacao:renderCaptacao,custos:renderCustos,informeir:renderInformeIR}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -2514,6 +2515,72 @@ function renderProjecao(){
     </div></div>`;
 }
 
+/* ---------------- INFORME DE RENDIMENTO (IR) ---------------- */
+let irAno=new Date().getFullYear()-1, irBusca='';
+function irPagoAluno(alunoId,ano){
+  const ini=`${ano}-01-01`, fim=`${ano}-12-31`;
+  return S.lancamentos.filter(l=>l.tipo==='entrada'&&l.aluno_id===alunoId&&l.status==='pago'
+    &&l.data_pagamento>=ini&&l.data_pagamento<=fim)
+    .reduce((s,l)=>s+Number(l.valor_pago||l.valor),0);
+}
+function renderInformeIR(){
+  const anos=[]; const ya=new Date().getFullYear(); for(let y=ya;y>=ya-4;y--)anos.push(y);
+  let lista=S.alunos.map(a=>({a,total:irPagoAluno(a.id,irAno)})).filter(x=>x.total>0);
+  if(irBusca){const q=irBusca.toLowerCase();lista=lista.filter(x=>x.a.nome.toLowerCase().includes(q)||(x.a.resp_nome||'').toLowerCase().includes(q));}
+  lista.sort((a,b)=>a.a.nome.localeCompare(b.a.nome));
+  const totGeral=lista.reduce((s,x)=>s+x.total,0);
+  $('view').innerHTML=head('Informe de rendimentos para IR','Informe IR',
+    `<select onchange="irAno=+this.value;renderInformeIR()" style="padding:7px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface)">${anos.map(y=>`<option ${y===irAno?'selected':''}>${y}</option>`).join('')}</select>`)
+  +`<div class="panel"><div class="panel-body" style="padding:14px 18px">
+      <p class="aging-note" style="margin:0">Mostra o total <b>efetivamente pago</b> em ${irAno} por aluno (lançamentos baixados como pagos). Gere o informe individual para entregar ao responsável declarar no Imposto de Renda.</p>
+    </div></div>
+   <div class="panel">
+    <div class="filters">
+      <input class="search" placeholder="Buscar aluno ou responsável..." value="${esc(irBusca)}" oninput="irBusca=this.value;renderInformeIR()">
+      <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${lista.length} alunos · ${fmtBRL(totGeral)} em ${irAno}</span>
+    </div>
+    ${lista.length?`<table><thead><tr><th>Aluno</th><th>Responsável financeiro</th><th>CPF</th><th class="num">Total pago ${irAno}</th><th></th></tr></thead>
+    <tbody>${lista.map(x=>`<tr>
+      <td><strong>${esc(x.a.nome)}</strong></td>
+      <td>${esc(x.a.resp_nome||x.a.mae_nome||'—')}</td>
+      <td style="font-size:12px">${esc(x.a.resp_cpf||'—')}</td>
+      <td class="num">${fmtNum(x.total)}</td>
+      <td><div class="row-acts">
+        <button class="icon-btn" onclick="verInformeIR('${x.a.id}')">Ver</button>
+        <button class="icon-btn pay" onclick="baixarInformeIR('${x.a.id}')">PDF</button></div></td></tr>`).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">§</div>Nenhum pagamento registrado em ${irAno}.</div>`}
+  </div>`;
+}
+function informeIRtexto(alunoId){
+  const a=S.alunos.find(x=>x.id===alunoId); const total=irPagoAluno(alunoId,irAno);
+  const c=S.config; const nl='\n';
+  const resp=a.resp_nome||a.mae_nome||'responsável';
+  const cpf=a.resp_cpf||a.mae_cpf||'';
+  let t=`INFORME DE RENDIMENTOS — ANO-CALENDÁRIO ${irAno}${nl}${nl}`;
+  t+=`${c.razao_social||c.nome||'Escola'}${nl}`;
+  if(c.cnpj)t+=`CNPJ: ${c.cnpj}${nl}`;
+  if(c.endereco)t+=`${c.endereco}${nl}`;
+  t+=nl+`Declaramos para os devidos fins que ${resp}`;
+  if(cpf)t+=` (CPF ${cpf})`;
+  t+=` efetuou, no ano-calendário de ${irAno}, o pagamento referente à prestação de serviços educacionais do(a) aluno(a) ${a.nome}, no valor total de:${nl}${nl}`;
+  t+=`R$ ${fmtNum(total)} (${total>0?'':''}valor pago no ano)${nl}${nl}`;
+  t+=`Este informe destina-se à Declaração de Ajuste Anual do Imposto de Renda Pessoa Física.${nl}${nl}`;
+  const cid=c.cidade?c.cidade+', ':'';
+  t+=`${cid}${fmtDate(todayISO())}${nl}${nl}${c.nome||'Escola'}`;
+  return {texto:t,total,aluno:a};
+}
+function verInformeIR(alunoId){
+  const r=informeIRtexto(alunoId);
+  openModal('Informe de IR · '+esc(r.aluno.nome),
+    `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7;background:var(--surface-2);padding:16px;border-radius:9px;margin:0;color:var(--ink)">${esc(r.texto)}</pre>`,
+    `<button class="btn ghost" onclick="imprimirDoc('Informe IR ${esc(r.aluno.nome)}',informeIRtexto('${alunoId}').texto)">Imprimir</button>
+     <button class="btn" onclick="baixarInformeIR('${alunoId}')">Baixar PDF</button>`);
+}
+function baixarInformeIR(alunoId){
+  const r=informeIRtexto(alunoId);
+  baixarPDF(r.texto,`Informe_IR_${irAno}_${slug(r.aluno.nome)}.pdf`);
+}
+
 /* ---------------- CONFIGURAÇÕES ---------------- */
 function renderConfig(){
   const c=S.config;
@@ -2532,6 +2599,9 @@ function renderConfig(){
         <div style="flex:1;min-width:240px">
           <div class="field"><label>Nome da escola (sai nos documentos)</label><input id="c_nome" value="${esc(c.nome||'')}"></div>
           <div class="field" style="margin-top:12px"><label>Cidade (sai nos recibos)</label><input id="c_cidade" value="${esc(c.cidade||'')}" placeholder="Ex: São Paulo"></div>
+          <div class="field" style="margin-top:12px"><label>Razão social (sai no Informe de IR)</label><input id="c_razao" value="${esc(c.razao_social||'')}"></div>
+          <div class="field" style="margin-top:12px"><label>CNPJ (sai no Informe de IR)</label><input id="c_cnpj" value="${esc(c.cnpj||'')}"></div>
+          <div class="field" style="margin-top:12px"><label>Endereço (sai no Informe de IR)</label><input id="c_endereco" value="${esc(c.endereco||'')}"></div>
           <p class="aging-note" style="margin-top:12px">A logo aparece no topo dos recibos e faturas impressos/baixados. PNG, JPG ou SVG, até ~500 KB. Fundo transparente fica melhor.</p>
           <button class="btn" style="margin-top:8px" onclick="saveIdentidade()">Salvar identidade</button>
         </div>
@@ -2617,7 +2687,10 @@ function carregarLogo(e){
   r.readAsDataURL(f); e.target.value='';
 }
 async function saveIdentidade(){
-  const rec={ nome:$('c_nome').value.trim()||'Escola', cidade:$('c_cidade').value.trim()||null, updated_at:new Date().toISOString() };
+  const rec={ nome:$('c_nome').value.trim()||'Escola', cidade:$('c_cidade').value.trim()||null,
+    razao_social:$('c_razao')?($('c_razao').value.trim()||null):null,
+    cnpj:$('c_cnpj')?($('c_cnpj').value.trim()||null):null,
+    endereco:$('c_endereco')?($('c_endereco').value.trim()||null):null, updated_at:new Date().toISOString() };
   if(_logoTmp)rec.logo_base64=_logoTmp;
   const {error}=await sb.from('escola_config').update(rec).eq('id',1);
   if(error)return toast(error.message,true); _logoTmp=null; await loadAll(); renderConfig(); aplicarMarca(); toast('Identidade salva.');
