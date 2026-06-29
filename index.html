@@ -1068,13 +1068,13 @@ function renderDespesas(){
       <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--clay)"></span>Folha mensal</div><div class="val mono">${fmtBRL(folha)}</div><div class="sub">${S.funcionarios.filter(f=>f.ativo).length} funcionários</div></div>
       <div class="kpi"><div class="lbl"><span class="dot" style="background:var(--sage)"></span>Contas fixas/mês</div><div class="val mono">${fmtBRL(fixasTot)}</div><div class="sub">${S.despesasFixas.filter(d=>d.ativo).length} contas</div></div>
     </div>`
-  +`<div class="panel"><div class="panel-head"><h2>Funcionários · folha</h2><button class="btn sm" onclick="modalFuncionario()">+ Funcionário</button></div>
-      ${S.funcionarios.length?`<table><thead><tr><th>Nome</th><th>Cargo</th><th class="num">Salário</th><th>Pgto dia</th><th>Status</th><th></th></tr></thead>
+  +`<div class="panel"><div class="panel-head"><h2>Funcionários · folha</h2><button class="btn ghost sm" onclick="go('funcionarios')">Gerenciar na aba Funcionários</button></div>
+      ${S.funcionarios.length?`<table><thead><tr><th>Nome</th><th>Cargo</th><th>Ciclo</th><th class="num">Custo/mês</th><th>Status</th></tr></thead>
       <tbody>${S.funcionarios.map(f=>`<tr><td><strong>${esc(f.nome)}</strong></td><td>${esc(f.cargo||'—')}</td>
-        <td class="num">${fmtNum(f.salario)}</td><td>${f.dia_pagamento}</td>
-        <td><span class="badge ${f.ativo?'ok':'muted'}">${f.ativo?'ativo':'inativo'}</span></td>
-        <td><div class="row-acts"><button class="icon-btn" onclick="modalFuncionario('${f.id}')">Editar</button></div></td></tr>`).join('')}</tbody></table>`
-      :`<div class="empty">Nenhum funcionário cadastrado.</div>`}
+        <td style="font-size:12px">${esc(f.ciclo||'geral')}</td>
+        <td class="num">${fmtNum(Number(f.salario||0)+Number(f.encargos||0)+Number(f.beneficios||0)+Number(f.vale||0))}</td>
+        <td><span class="badge ${f.ativo?'ok':'muted'}">${f.ativo?'ativo':'inativo'}</span></td></tr>`).join('')}</tbody></table>`
+      :`<div class="empty">Nenhum funcionário. <button class="btn sm" style="margin-top:8px" onclick="go('funcionarios')">Cadastrar na aba Funcionários</button></div>`}
     </div>`
   +`<div class="panel"><div class="panel-head"><h2>Contas fixas mensais</h2><button class="btn sm" onclick="modalDespFixa()">+ Conta fixa</button></div>
       ${S.despesasFixas.length?`<table><thead><tr><th>Descrição</th><th>Categoria</th><th class="num">Valor base</th><th>Venc. dia</th><th>Status</th><th></th></tr></thead>
@@ -1093,23 +1093,7 @@ function renderDespesas(){
       :`<div class="empty"><div class="big">⊟</div>Nenhuma despesa nesta competência.<br><button class="btn sm" style="margin-top:12px" onclick="abrirGerarDespesas()">Gerar folha + contas fixas</button></div>`}
     </div>`;
 }
-function modalFuncionario(id){
-  const f=id?S.funcionarios.find(x=>x.id===id):{ativo:true,dia_pagamento:5};
-  openModal(id?'Editar funcionário':'Novo funcionário',`
-    <div class="grid2">
-      <div class="field" style="grid-column:1/3"><label>Nome *</label><input id="fu_nome" value="${esc(f.nome||'')}"></div>
-      <div class="field"><label>Cargo</label><input id="fu_cargo" value="${esc(f.cargo||'')}"></div>
-      <div class="field"><label>Salário</label><input id="fu_sal" class="mono" value="${f.salario?fmtNum(f.salario):''}"></div>
-      <div class="field"><label>Dia de pagamento</label><input id="fu_dia" type="number" min="1" max="31" value="${f.dia_pagamento||5}"></div>
-      <div class="field"><label>Ciclo que atende</label><select id="fu_ciclo"><option value="">Rateio geral</option>${['Educação Infantil','Fundamental I','Fundamental II','Ensino Médio'].map(s=>`<option ${f.ciclo===s?'selected':''}>${s}</option>`).join('')}</select></div>
-      <div class="field"><label>Status</label><select id="fu_ativo"><option value="true" ${f.ativo!==false?'selected':''}>Ativo</option><option value="false" ${f.ativo===false?'selected':''}>Inativo</option></select></div>
-    </div>`,
-    `${id?`<button class="btn ghost" onclick="delFuncionario('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
-     <button class="btn ghost" onclick="closeModal()">Cancelar</button>
-     <button class="btn" onclick="saveFuncionario('${id||''}')">Salvar</button>`);
-}
-async function saveFuncionario(id){
-  const nome=$('fu_nome').value.trim(); if(!nome)return toast('Informe o nome.',true);
+ toast('Informe o nome.',true);
   const rec={ nome, cargo:$('fu_cargo').value.trim()||null, salario:parseMoneyBR($('fu_sal').value)||0,
     dia_pagamento:+$('fu_dia').value||5, ativo:$('fu_ativo').value==='true', ciclo:$('fu_ciclo')?($('fu_ciclo').value||null):null };
   const q=id?sb.from('funcionarios').update(rec).eq('id',id):sb.from('funcionarios').insert(rec);
@@ -2488,7 +2472,57 @@ function renderCustos(){
   +renderMargemAluno()
   +renderProjecao();
 }
+let margemBusca='';
 function renderMargemAluno(){
+  const rateio=custoRateioGeral();
+  const ORDEM=['Educação Infantil','Fundamental I','Fundamental II','Ensino Médio'];
+  let ativos=S.alunos.filter(a=>a.status==='ativo');
+  const q=margemBusca.trim().toLowerCase();
+  if(q)ativos=ativos.filter(a=>a.nome.toLowerCase().includes(q));
+  // totais gerais (sempre sobre todos os ativos, não filtrados)
+  let tMens=0,tCusto=0;
+  S.alunos.filter(a=>a.status==='ativo').forEach(a=>{tMens+=mensalAluno(a);tCusto+=custoAluno(a);});
+  const tLucro=tMens-tCusto;
+  // agrupa por segmento
+  const grupos={}; ativos.forEach(a=>{const s=a.segmento||'Sem segmento';(grupos[s]=grupos[s]||[]).push(a);});
+  const segOrder=Object.keys(grupos).sort((x,y)=>{const ix=ORDEM.indexOf(x),iy=ORDEM.indexOf(y);return (ix<0?99:ix)-(iy<0?99:iy)||x.localeCompare(y);});
+  const linhaAluno=a=>{const m=mensalAluno(a),c=custoAluno(a),lucro=m-c,pct=m?Math.round(lucro/m*100):0,manual=(a.custo_manual!=null&&a.custo_manual!=='');
+    return `<tr>
+      <td><strong>${esc(a.nome)}</strong></td>
+      <td class="num">${fmtNum(m)}</td>
+      <td class="num">${fmtNum(c)}${manual?' <span class="badge muted" style="font-size:10px">manual</span>':''}</td>
+      <td class="num" style="color:${lucro>=0?'var(--forest)':'var(--clay)'}">${fmtNum(lucro)}</td>
+      <td class="num" style="color:${lucro>=0?'var(--forest)':'var(--clay)'}">${m?pct+'%':'—'}</td>
+      <td><div class="row-acts"><button class="icon-btn" onclick="modalMargemAluno('${a.id}')">Editar</button></div></td></tr>`;};
+  const secoes=segOrder.map(seg=>{
+    const al=grupos[seg].sort((a,b)=>a.nome.localeCompare(b.nome));
+    let sM=0,sC=0; al.forEach(a=>{sM+=mensalAluno(a);sC+=custoAluno(a);});
+    const sL=sM-sC, cor=SEG_COR[seg]||'#9A8C7A';
+    return `<tr style="background:var(--surface-2)"><td colspan="6" style="padding:9px 14px">
+        <span style="display:inline-flex;align-items:center;gap:8px;font-weight:700">
+          <span style="width:10px;height:10px;border-radius:50%;background:${cor}"></span>${esc(seg)}
+          <span style="font-weight:400;color:var(--ink-soft);font-size:12px">${al.length} alunos · margem ${fmtBRL(sL)} (${sM?Math.round(sL/sM*100):0}%)</span></span></td></tr>`
+      +al.map(linhaAluno).join('');
+  }).join('');
+  return `<div class="panel"><div class="panel-head"><h2>Margem por aluno</h2>
+      <span style="font-size:12px;color:var(--ink-soft)">custo base (rateio): ${fmtBRL(rateio)}/aluno · clique em Editar</span></div>
+    <div class="filters">
+      <input class="search" placeholder="Buscar aluno pelo nome..." value="${esc(margemBusca)}" oninput="margemBusca=this.value;renderCustosMargemRefresh()">
+      ${q?`<button class="btn ghost sm" onclick="margemBusca='';renderCustosMargemRefresh()">Limpar</button>`:''}
+      <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${ativos.length} alunos</span>
+    </div>
+    <div class="panel-body" style="padding:10px 14px">
+      <p class="aging-note" style="margin:4px 6px 12px">Agrupado por segmento. A mensalidade e o custo são editáveis por aluno; sem custo manual, usa-se o rateio. Custo manual aparece marcado.</p>
+      <table><thead><tr><th>Aluno</th><th class="num">Mensalidade</th><th class="num">Custo</th><th class="num">Lucro</th><th class="num">Margem</th><th></th></tr></thead>
+      <tbody>${secoes||'<tr><td colspan="6" class="empty">Nenhum aluno encontrado.</td></tr>'}
+        <tr style="font-weight:700;background:var(--surface-2)"><td>Total geral</td>
+          <td class="num">${fmtNum(tMens)}</td><td class="num">${fmtNum(tCusto)}</td>
+          <td class="num" style="color:${tLucro>=0?'var(--forest)':'var(--clay)'}">${fmtNum(tLucro)}</td>
+          <td class="num">${tMens?Math.round(tLucro/tMens*100)+'%':'—'}</td><td></td></tr>
+      </tbody></table>
+    </div></div>`;
+}
+function renderCustosMargemRefresh(){ renderCustos(); }(){
   const ativos=S.alunos.filter(a=>a.status==='ativo').sort((a,b)=>a.nome.localeCompare(b.nome));
   const rateio=custoRateioGeral();
   let tMens=0,tCusto=0;
