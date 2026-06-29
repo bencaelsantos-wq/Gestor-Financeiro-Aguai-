@@ -1092,17 +1092,6 @@ function renderDespesas(){
         <td><div class="row-acts">${l.status!=='pago'?`<button class="icon-btn pay" onclick="modalPagarDespesa('${l.id}')">Pagar</button>`:''}<button class="icon-btn" onclick="modalLanc('${l.id}')">⋯</button></div></td></tr>`;}).join('')}</tbody></table>`
       :`<div class="empty"><div class="big">⊟</div>Nenhuma despesa nesta competência.<br><button class="btn sm" style="margin-top:12px" onclick="abrirGerarDespesas()">Gerar folha + contas fixas</button></div>`}
     </div>`;
-}
- toast('Informe o nome.',true);
-  const rec={ nome, cargo:$('fu_cargo').value.trim()||null, salario:parseMoneyBR($('fu_sal').value)||0,
-    dia_pagamento:+$('fu_dia').value||5, ativo:$('fu_ativo').value==='true', ciclo:$('fu_ciclo')?($('fu_ciclo').value||null):null };
-  const q=id?sb.from('funcionarios').update(rec).eq('id',id):sb.from('funcionarios').insert(rec);
-  const {error}=await q; if(error)return toast(error.message,true);
-  closeModal(); await loadAll(); renderDespesas(); toast('Funcionário salvo.');
-}
-async function delFuncionario(id){ if(!confirm('Excluir funcionário?'))return;
-  const {error}=await sb.from('funcionarios').delete().eq('id',id); if(error)return toast(error.message,true);
-  closeModal(); await loadAll(); renderDespesas(); toast('Excluído.'); }
 function modalDespFixa(id){
   const d=id?S.despesasFixas.find(x=>x.id===id):{ativo:true,dia_vencimento:10};
   const catOpts=catsByTipo('saida').map(c=>`<option value="${c.id}" ${d.categoria_id===c.id?'selected':''}>${esc(c.nome)}</option>`).join('');
@@ -2522,34 +2511,7 @@ function renderMargemAluno(){
       </tbody></table>
     </div></div>`;
 }
-function renderCustosMargemRefresh(){ renderCustos(); }(){
-  const ativos=S.alunos.filter(a=>a.status==='ativo').sort((a,b)=>a.nome.localeCompare(b.nome));
-  const rateio=custoRateioGeral();
-  let tMens=0,tCusto=0;
-  const linhas=ativos.map(a=>{const m=mensalAluno(a),c=custoAluno(a);tMens+=m;tCusto+=c;
-    const lucro=m-c,pct=m?Math.round(lucro/m*100):0,manual=(a.custo_manual!=null&&a.custo_manual!=='');
-    return {a,m,c,lucro,pct,manual};});
-  const tLucro=tMens-tCusto;
-  return `<div class="panel"><div class="panel-head"><h2>Margem por aluno</h2>
-      <span style="font-size:12px;color:var(--ink-soft)">custo base (rateio): ${fmtBRL(rateio)}/aluno · clique para editar</span></div>
-    <div class="panel-body" style="padding:10px 14px">
-      <p class="aging-note" style="margin:4px 6px 12px">A mensalidade e o custo são editáveis por aluno. Sem custo manual, usa-se o rateio (folha + contas ÷ alunos ativos). Custo manual aparece marcado.</p>
-      <table><thead><tr><th>Aluno</th><th>Segmento</th><th class="num">Mensalidade</th><th class="num">Custo</th><th class="num">Lucro</th><th class="num">Margem</th><th></th></tr></thead>
-      <tbody>${linhas.map(x=>`<tr>
-        <td><strong>${esc(x.a.nome)}</strong></td>
-        <td style="font-size:12px">${esc(x.a.segmento||'—')}</td>
-        <td class="num">${fmtNum(x.m)}</td>
-        <td class="num">${fmtNum(x.c)}${x.manual?' <span class="badge muted" style="font-size:10px">manual</span>':''}</td>
-        <td class="num" style="color:${x.lucro>=0?'var(--forest)':'var(--clay)'}">${fmtNum(x.lucro)}</td>
-        <td class="num" style="color:${x.lucro>=0?'var(--forest)':'var(--clay)'}">${x.m?x.pct+'%':'—'}</td>
-        <td><div class="row-acts"><button class="icon-btn" onclick="modalMargemAluno('${x.a.id}')">Editar</button></div></td></tr>`).join('')}
-        <tr style="font-weight:700;background:var(--surface-2)"><td>Total</td><td></td>
-          <td class="num">${fmtNum(tMens)}</td><td class="num">${fmtNum(tCusto)}</td>
-          <td class="num" style="color:${tLucro>=0?'var(--forest)':'var(--clay)'}">${fmtNum(tLucro)}</td>
-          <td class="num">${tMens?Math.round(tLucro/tMens*100)+'%':'—'}</td><td></td></tr>
-      </tbody></table>
-    </div></div>`;
-}
+function renderCustosMargemRefresh(){ renderCustos(); }
 function modalMargemAluno(id){
   const a=S.alunos.find(x=>x.id===id); if(!a)return;
   const rateio=custoRateioGeral();
