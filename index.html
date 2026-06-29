@@ -653,7 +653,10 @@ function modalAluno(id){
       ${F('resp_bairro','Bairro')}
       ${F('resp_cidade','Cidade')}
       ${F('resp_estado','Estado')}
-      ${ADMIN?`${sec('Proposta financeira')}
+      ${ADMIN?`${sec('Margem (custo x lucro)')}
+      ${F('mensalidade_real','Mensalidade real (R$)')}
+      ${F('custo_manual','Custo do aluno (R$)')}
+      ${sec('Proposta financeira')}
       ${F('prop_modo','Tipo (Novo/Antigo)')}
       ${F('prop_primeira_parcela','1ª parcela (R$)')}
       ${F('prop_primeira_modo','Modo 1ª parcela')}
@@ -716,7 +719,8 @@ async function saveAluno(id){
     resp_parentesco:v('resp_parentesco'), resp_cep:v('resp_cep'), resp_logradouro:v('resp_logradouro'),
     resp_numero:v('resp_numero'), resp_complemento:v('resp_complemento'), resp_bairro:v('resp_bairro'),
     resp_cidade:v('resp_cidade'), resp_estado:v('resp_estado'),
-    ...(ADMIN?{prop_modo:v('prop_modo'), prop_primeira_parcela:parseMoneyBR(v('prop_primeira_parcela')),
+    ...(ADMIN?{mensalidade_real:parseMoneyBR(v('mensalidade_real')), custo_manual:parseMoneyBR(v('custo_manual')),
+      prop_modo:v('prop_modo'), prop_primeira_parcela:parseMoneyBR(v('prop_primeira_parcela')),
       prop_primeira_modo:v('prop_primeira_modo'), prop_12x:parseMoneyBR(v('prop_12x')), prop_12x_modo:v('prop_12x_modo'),
       prop_taxa:parseMoneyBR(v('prop_taxa')), prop_valor_bruto:parseMoneyBR(v('prop_valor_bruto')),
       prop_desconto:parseMoneyBR(v('prop_desconto')), prop_valor_total:parseMoneyBR(v('prop_valor_total')),
@@ -2421,9 +2425,20 @@ async function converterCaptacao(id){
 /* ---------------- CUSTOS E MARGEM ---------------- */
 let custoAno=new Date().getFullYear();
 function mensalAluno(a){
+  if(a.mensalidade_real!=null&&a.mensalidade_real!=='')return Number(a.mensalidade_real);
   if(a.prop_valor_total)return Number(a.prop_valor_total);
   const p=planoDe(a); if(p&&p.valor_mensalidade)return aplicarDescontos(p.valor_mensalidade,a.id);
   return 0;
+}
+function custoRateioGeral(){
+  const fixas=S.despesasFixas.filter(d=>d.ativo).reduce((s,d)=>s+Number(d.valor),0);
+  const folha=S.funcionarios.filter(f=>f.ativo).reduce((s,f)=>s+Number(f.salario||0),0);
+  const n=S.alunos.filter(a=>a.status==='ativo').length||1;
+  return (fixas+folha)/n;
+}
+function custoAluno(a){
+  if(a.custo_manual!=null&&a.custo_manual!=='')return Number(a.custo_manual);
+  return custoRateioGeral();
 }
 function renderCustos(){
   const CICLOS=['Educação Infantil','Fundamental I','Fundamental II','Ensino Médio'];
@@ -2469,7 +2484,60 @@ function renderCustos(){
     </tbody></table>
     <p class="aging-note" style="padding:10px 20px">Custo = folha do ciclo + rateio das contas fixas e da folha geral por nº de alunos. Quanto mais funcionários tiverem o ciclo marcado, mais preciso fica.</p>
   </div>`
+  +renderMargemAluno()
   +renderProjecao();
+}
+function renderMargemAluno(){
+  const ativos=S.alunos.filter(a=>a.status==='ativo').sort((a,b)=>a.nome.localeCompare(b.nome));
+  const rateio=custoRateioGeral();
+  let tMens=0,tCusto=0;
+  const linhas=ativos.map(a=>{const m=mensalAluno(a),c=custoAluno(a);tMens+=m;tCusto+=c;
+    const lucro=m-c,pct=m?Math.round(lucro/m*100):0,manual=(a.custo_manual!=null&&a.custo_manual!=='');
+    return {a,m,c,lucro,pct,manual};});
+  const tLucro=tMens-tCusto;
+  return `<div class="panel"><div class="panel-head"><h2>Margem por aluno</h2>
+      <span style="font-size:12px;color:var(--ink-soft)">custo base (rateio): ${fmtBRL(rateio)}/aluno · clique para editar</span></div>
+    <div class="panel-body" style="padding:10px 14px">
+      <p class="aging-note" style="margin:4px 6px 12px">A mensalidade e o custo são editáveis por aluno. Sem custo manual, usa-se o rateio (folha + contas ÷ alunos ativos). Custo manual aparece marcado.</p>
+      <table><thead><tr><th>Aluno</th><th>Segmento</th><th class="num">Mensalidade</th><th class="num">Custo</th><th class="num">Lucro</th><th class="num">Margem</th><th></th></tr></thead>
+      <tbody>${linhas.map(x=>`<tr>
+        <td><strong>${esc(x.a.nome)}</strong></td>
+        <td style="font-size:12px">${esc(x.a.segmento||'—')}</td>
+        <td class="num">${fmtNum(x.m)}</td>
+        <td class="num">${fmtNum(x.c)}${x.manual?' <span class="badge muted" style="font-size:10px">manual</span>':''}</td>
+        <td class="num" style="color:${x.lucro>=0?'var(--forest)':'var(--clay)'}">${fmtNum(x.lucro)}</td>
+        <td class="num" style="color:${x.lucro>=0?'var(--forest)':'var(--clay)'}">${x.m?x.pct+'%':'—'}</td>
+        <td><div class="row-acts"><button class="icon-btn" onclick="modalMargemAluno('${x.a.id}')">Editar</button></div></td></tr>`).join('')}
+        <tr style="font-weight:700;background:var(--surface-2)"><td>Total</td><td></td>
+          <td class="num">${fmtNum(tMens)}</td><td class="num">${fmtNum(tCusto)}</td>
+          <td class="num" style="color:${tLucro>=0?'var(--forest)':'var(--clay)'}">${fmtNum(tLucro)}</td>
+          <td class="num">${tMens?Math.round(tLucro/tMens*100)+'%':'—'}</td><td></td></tr>
+      </tbody></table>
+    </div></div>`;
+}
+function modalMargemAluno(id){
+  const a=S.alunos.find(x=>x.id===id); if(!a)return;
+  const rateio=custoRateioGeral();
+  openModal('Margem · '+esc(a.nome),`
+    <p class="hint" style="margin-top:0">Deixe em branco para usar o cálculo automático. Custo em branco = rateio de ${fmtBRL(rateio)}.</p>
+    <div class="grid2">
+      <div class="field"><label>Mensalidade real (R$)</label><input id="ma_mens" class="mono" value="${a.mensalidade_real!=null&&a.mensalidade_real!==''?fmtNum(a.mensalidade_real):''}" placeholder="${fmtNum(mensalAluno(a))}"></div>
+      <div class="field"><label>Custo do aluno (R$)</label><input id="ma_custo" class="mono" value="${a.custo_manual!=null&&a.custo_manual!==''?fmtNum(a.custo_manual):''}" placeholder="${fmtNum(rateio)} (rateio)"></div>
+    </div>
+    <div class="tip" style="background:var(--surface-2);border-radius:8px;padding:10px 14px;margin-top:12px;font-size:12.5px;color:var(--ink-soft)">
+      Mensalidade atual considerada: <b class="mono">${fmtBRL(mensalAluno(a))}</b>. A mensalidade real também afeta cobranças e relatórios.
+    </div>`,
+    `<button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveMargemAluno('${id}')">Salvar</button>`);
+}
+async function saveMargemAluno(id){
+  const mens=parseMoneyBR($('ma_mens').value);
+  const custo=parseMoneyBR($('ma_custo').value);
+  const rec={ mensalidade_real: ($('ma_mens').value.trim()===''?null:mens),
+              custo_manual: ($('ma_custo').value.trim()===''?null:custo) };
+  const {error}=await sb.from('alunos').update(rec).eq('id',id);
+  if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderCustos(); toast('Margem do aluno atualizada.');
 }
 function renderProjecao(){
   const ano=custoAno;
