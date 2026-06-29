@@ -1092,6 +1092,7 @@ function renderDespesas(){
         <td><div class="row-acts">${l.status!=='pago'?`<button class="icon-btn pay" onclick="modalPagarDespesa('${l.id}')">Pagar</button>`:''}<button class="icon-btn" onclick="modalLanc('${l.id}')">⋯</button></div></td></tr>`;}).join('')}</tbody></table>`
       :`<div class="empty"><div class="big">⊟</div>Nenhuma despesa nesta competência.<br><button class="btn sm" style="margin-top:12px" onclick="abrirGerarDespesas()">Gerar folha + contas fixas</button></div>`}
     </div>`;
+}
 function modalDespFixa(id){
   const d=id?S.despesasFixas.find(x=>x.id===id):{ativo:true,dia_vencimento:10};
   const catOpts=catsByTipo('saida').map(c=>`<option value="${c.id}" ${d.categoria_id===c.id?'selected':''}>${esc(c.nome)}</option>`).join('');
