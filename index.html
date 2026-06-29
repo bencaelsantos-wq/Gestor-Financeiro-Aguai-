@@ -2497,20 +2497,65 @@ function renderMargemAluno(){
   return `<div class="panel"><div class="panel-head"><h2>Margem por aluno</h2>
       <span style="font-size:12px;color:var(--ink-soft)">custo base (rateio): ${fmtBRL(rateio)}/aluno · clique em Editar</span></div>
     <div class="filters">
-      <input class="search" placeholder="Buscar aluno pelo nome..." value="${esc(margemBusca)}" oninput="margemBusca=this.value;renderCustosMargemRefresh()">
-      ${q?`<button class="btn ghost sm" onclick="margemBusca='';renderCustosMargemRefresh()">Limpar</button>`:''}
-      <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${ativos.length} alunos</span>
+      <input id="margemBuscaInput" class="search" placeholder="Buscar aluno pelo nome..." value="${esc(margemBusca)}" oninput="filtrarMargem(this)">
+      ${q?`<button class="btn ghost sm" onclick="margemBusca='';renderCustos()">Limpar</button>`:''}
+      <span id="margemContador" style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${ativos.length} alunos</span>
     </div>
     <div class="panel-body" style="padding:10px 14px">
       <p class="aging-note" style="margin:4px 6px 12px">Agrupado por segmento. A mensalidade e o custo são editáveis por aluno; sem custo manual, usa-se o rateio. Custo manual aparece marcado.</p>
       <table><thead><tr><th>Aluno</th><th class="num">Mensalidade</th><th class="num">Custo</th><th class="num">Lucro</th><th class="num">Margem</th><th></th></tr></thead>
-      <tbody>${secoes||'<tr><td colspan="6" class="empty">Nenhum aluno encontrado.</td></tr>'}
+      <tbody id="margemTabBody">${secoes||'<tr><td colspan="6" class="empty">Nenhum aluno encontrado.</td></tr>'}
         <tr style="font-weight:700;background:var(--surface-2)"><td>Total geral</td>
           <td class="num">${fmtNum(tMens)}</td><td class="num">${fmtNum(tCusto)}</td>
           <td class="num" style="color:${tLucro>=0?'var(--forest)':'var(--clay)'}">${fmtNum(tLucro)}</td>
           <td class="num">${tMens?Math.round(tLucro/tMens*100)+'%':'—'}</td><td></td></tr>
       </tbody></table>
     </div></div>`;
+}
+function margemTabelaHTML(){
+  const ORDEM=['Educação Infantil','Fundamental I','Fundamental II','Ensino Médio'];
+  let ativos=S.alunos.filter(a=>a.status==='ativo');
+  const q=margemBusca.trim().toLowerCase();
+  if(q)ativos=ativos.filter(a=>a.nome.toLowerCase().includes(q));
+  let tMens=0,tCusto=0;
+  S.alunos.filter(a=>a.status==='ativo').forEach(a=>{tMens+=mensalAluno(a);tCusto+=custoAluno(a);});
+  const tLucro=tMens-tCusto;
+  const grupos={}; ativos.forEach(a=>{const s=a.segmento||'Sem segmento';(grupos[s]=grupos[s]||[]).push(a);});
+  const segOrder=Object.keys(grupos).sort((x,y)=>{const ix=ORDEM.indexOf(x),iy=ORDEM.indexOf(y);return (ix<0?99:ix)-(iy<0?99:iy)||x.localeCompare(y);});
+  const linhaAluno=a=>{const m=mensalAluno(a),c=custoAluno(a),lucro=m-c,pct=m?Math.round(lucro/m*100):0,manual=(a.custo_manual!=null&&a.custo_manual!=='');
+    return `<tr>
+      <td><strong>${esc(a.nome)}</strong></td>
+      <td class="num">${fmtNum(m)}</td>
+      <td class="num">${fmtNum(c)}${manual?' <span class="badge muted" style="font-size:10px">manual</span>':''}</td>
+      <td class="num" style="color:${lucro>=0?'var(--forest)':'var(--clay)'}">${fmtNum(lucro)}</td>
+      <td class="num" style="color:${lucro>=0?'var(--forest)':'var(--clay)'}">${m?pct+'%':'—'}</td>
+      <td><div class="row-acts"><button class="icon-btn" onclick="modalMargemAluno('${a.id}')">Editar</button></div></td></tr>`;};
+  const secoes=segOrder.map(seg=>{
+    const al=grupos[seg].sort((a,b)=>a.nome.localeCompare(b.nome));
+    let sM=0,sC=0; al.forEach(a=>{sM+=mensalAluno(a);sC+=custoAluno(a);});
+    const sL=sM-sC, cor=SEG_COR[seg]||'#9A8C7A';
+    return `<tr style="background:var(--surface-2)"><td colspan="6" style="padding:9px 14px">
+        <span style="display:inline-flex;align-items:center;gap:8px;font-weight:700">
+          <span style="width:10px;height:10px;border-radius:50%;background:${cor}"></span>${esc(seg)}
+          <span style="font-weight:400;color:var(--ink-soft);font-size:12px">${al.length} alunos · margem ${fmtBRL(sL)} (${sM?Math.round(sL/sM*100):0}%)</span></span></td></tr>`
+      +al.map(linhaAluno).join('');
+  }).join('');
+  return {html:(secoes||'<tr><td colspan="6" class="empty">Nenhum aluno encontrado.</td></tr>')
+    +`<tr style="font-weight:700;background:var(--surface-2)"><td>Total geral</td>
+        <td class="num">${fmtNum(tMens)}</td><td class="num">${fmtNum(tCusto)}</td>
+        <td class="num" style="color:${tLucro>=0?'var(--forest)':'var(--clay)'}">${fmtNum(tLucro)}</td>
+        <td class="num">${tMens?Math.round(tLucro/tMens*100)+'%':'—'}</td><td></td></tr>`,
+    count:ativos.length};
+}
+function filtrarMargem(el){
+  const pos=el.selectionStart;
+  margemBusca=el.value;
+  const r=margemTabelaHTML();
+  const body=document.getElementById('margemTabBody');
+  const cont=document.getElementById('margemContador');
+  if(body)body.innerHTML=r.html;
+  if(cont)cont.textContent=r.count+' alunos';
+  el.focus(); try{el.setSelectionRange(pos,pos);}catch(e){}
 }
 function renderCustosMargemRefresh(){ renderCustos(); }
 function modalMargemAluno(id){
