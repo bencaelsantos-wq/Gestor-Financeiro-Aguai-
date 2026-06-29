@@ -349,6 +349,7 @@ const NAV_GROUPS=[
     {id:'faturas',  label:'Faturas / envio',ic:'✉'},
     {id:'caixa',    label:'Fluxo de caixa',ic:'⇅'},
     {id:'despesas', label:'Despesas',      ic:'⊟'},
+    {id:'funcionarios',label:'Funcionários',ic:'☺'},
     {id:'inadimp',  label:'Inadimplência', ic:'⚠'},
     {id:'rematriculas',label:'Rematrícula', ic:'↻'},
     {id:'acordos',  label:'Acordos',       ic:'≈'},
@@ -474,7 +475,7 @@ function render(){ ({painel:renderPainel,alunos:renderAlunos,cobrancas:renderCob
   caixa:renderCaixa,despesas:renderDespesas,inadimp:renderInadimp,importar:renderImportar,config:renderConfig,
   documentacao:renderDocumentacao,contatos:renderContatos,aniversarios:renderAniversarios,inclusao:renderInclusao,turmas:renderTurmas,
   metas:renderMetas,historico:renderHistorico,busca:renderBusca,
-  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios,matriculas:renderMatriculas,captacao:renderCaptacao,custos:renderCustos,informeir:renderInformeIR}[TAB])(); }
+  rematriculas:renderRematriculas,acordos:renderAcordos,relatorios:renderRelatorios,matriculas:renderMatriculas,captacao:renderCaptacao,custos:renderCustos,informeir:renderInformeIR,funcionarios:renderFuncionarios}[TAB])(); }
 
 function head(eyebrow,title,toolbar=''){ return `<div class="page-head">
   <div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>
@@ -2432,7 +2433,7 @@ function mensalAluno(a){
 }
 function custoRateioGeral(){
   const fixas=S.despesasFixas.filter(d=>d.ativo).reduce((s,d)=>s+Number(d.valor),0);
-  const folha=S.funcionarios.filter(f=>f.ativo).reduce((s,f)=>s+Number(f.salario||0),0);
+  const folha=S.funcionarios.filter(f=>f.ativo).reduce((s,f)=>s+Number(f.salario||0)+Number(f.encargos||0)+Number(f.beneficios||0)+Number(f.vale||0),0);
   const n=S.alunos.filter(a=>a.status==='ativo').length||1;
   return (fixas+folha)/n;
 }
@@ -2648,6 +2649,109 @@ function baixarInformeIR(alunoId){
   const r=informeIRtexto(alunoId);
   baixarPDF(r.texto,`Informe_IR_${irAno}_${slug(r.aluno.nome)}.pdf`);
 }
+
+/* ---------------- FUNCIONÁRIOS (ficha completa) ---------------- */
+let funcBusca='', funcTipo='';
+function custoFuncionario(f){ return Number(f.salario||0)+Number(f.encargos||0)+Number(f.beneficios||0)+Number(f.vale||0); }
+function renderFuncionarios(){
+  let lista=[...(S.funcionarios||[])];
+  if(funcTipo==='ativo')lista=lista.filter(f=>f.ativo);
+  else if(funcTipo==='inativo')lista=lista.filter(f=>!f.ativo);
+  if(funcBusca){const q=funcBusca.toLowerCase();lista=lista.filter(f=>(f.nome||'').toLowerCase().includes(q)||(f.cargo||'').toLowerCase().includes(q));}
+  lista.sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
+  const ativos=S.funcionarios.filter(f=>f.ativo);
+  const custoTotal=ativos.reduce((s,f)=>s+custoFuncionario(f),0);
+  $('view').innerHTML=head('Quadro de pessoal','Funcionários',
+    `<button class="btn sm" onclick="modalFunc()">+ Funcionário</button>`)
+  +`<div class="kpi-grid">
+      <div class="kpi"><div class="lbl">Funcionários ativos</div><div class="val">${ativos.length}</div></div>
+      <div class="kpi accent"><div class="lbl">Custo mensal total</div><div class="val mono" style="font-size:20px">${fmtBRL(custoTotal)}</div><div class="sub">salário + encargos + benefícios</div></div>
+      <div class="kpi"><div class="lbl">Custo médio</div><div class="val mono" style="font-size:20px">${ativos.length?fmtBRL(custoTotal/ativos.length):'—'}</div></div>
+    </div>
+    <div class="panel">
+    <div class="filters">
+      <input class="search" placeholder="Buscar por nome ou cargo..." value="${esc(funcBusca)}" oninput="funcBusca=this.value;renderFuncionarios()">
+      <select onchange="funcTipo=this.value;renderFuncionarios()">
+        <option value="">Todos</option><option value="ativo" ${funcTipo==='ativo'?'selected':''}>Ativos</option><option value="inativo" ${funcTipo==='inativo'?'selected':''}>Inativos</option></select>
+      <span style="margin-left:auto;font-size:13px;color:var(--ink-soft)">${lista.length} de ${S.funcionarios.length}</span>
+    </div>
+    ${lista.length?`<table><thead><tr><th>Nome</th><th>Cargo</th><th>Ciclo</th><th>Contrato</th><th class="num">Custo/mês</th><th>Status</th><th></th></tr></thead>
+    <tbody>${lista.map(f=>`<tr>
+      <td><strong>${esc(f.nome)}</strong>${f.disciplinas?`<div style="font-size:12px;color:var(--ink-soft)">${esc(f.disciplinas)}</div>`:''}</td>
+      <td style="font-size:12px">${esc(f.cargo||'—')}</td>
+      <td style="font-size:12px">${esc(f.ciclo||'geral')}</td>
+      <td style="font-size:12px">${esc(f.tipo_contrato||'—')}</td>
+      <td class="num">${fmtNum(custoFuncionario(f))}</td>
+      <td><span class="badge ${f.ativo?'ok':'muted'}">${f.ativo?'ativo':'inativo'}</span></td>
+      <td><div class="row-acts"><button class="icon-btn" onclick="modalFunc('${f.id}')">Editar</button></div></td></tr>`).join('')}</tbody></table>`
+    :`<div class="empty"><div class="big">☺</div>Nenhum funcionário cadastrado. Toque em + Funcionário para começar.</div>`}
+  </div>`;
+}
+function modalFunc(id){
+  const f=id?S.funcionarios.find(x=>x.id===id):{ativo:true,dia_pagamento:5};
+  const F=(k,lbl,type='text',span=false)=>`<div class="field"${span?' style="grid-column:1/3"':''}><label>${lbl}</label><input id="fn_${k}" type="${type}" value="${esc(f[k]==null?'':f[k])}"></div>`;
+  const M=(k,lbl)=>`<div class="field"><label>${lbl}</label><input id="fn_${k}" class="mono" value="${f[k]!=null&&f[k]!==''?fmtNum(f[k]):''}"></div>`;
+  const sec=t=>`<div class="sec-title" style="grid-column:1/3">${t}</div>`;
+  openModal(id?'Ficha do funcionário':'Novo funcionário',`
+    <div class="grid2">
+      ${sec('Dados pessoais')}
+      <div class="field" style="grid-column:1/3"><label>Nome *</label><input id="fn_nome" value="${esc(f.nome||'')}"></div>
+      ${F('cpf','CPF')}
+      ${F('rg','RG')}
+      ${F('nascimento','Nascimento','date')}
+      ${F('telefone','Telefone')}
+      <div class="field" style="grid-column:1/3"><label>E-mail</label><input id="fn_email" type="email" value="${esc(f.email||'')}"></div>
+      ${F('cep','CEP')}
+      <div class="field" style="grid-column:1/3"><label>Logradouro</label><input id="fn_logradouro" value="${esc(f.logradouro||'')}"></div>
+      ${F('numero','Número')}
+      ${F('complemento','Complemento')}
+      ${F('bairro','Bairro')}
+      ${F('cidade','Cidade')}
+      ${F('estado','Estado')}
+
+      ${sec('Contrato')}
+      ${F('cargo','Cargo')}
+      <div class="field"><label>Tipo de contrato</label><select id="fn_tipo_contrato"><option value="">—</option>${['CLT','PJ','Horista','Estágio','Terceirizado'].map(t=>`<option ${f.tipo_contrato===t?'selected':''}>${t}</option>`).join('')}</select></div>
+      ${F('admissao','Admissão','date')}
+      ${F('demissao','Demissão','date')}
+      ${F('jornada','Jornada (ex: 40h/sem)')}
+      <div class="field"><label>Status</label><select id="fn_ativo"><option value="true" ${f.ativo!==false?'selected':''}>Ativo</option><option value="false" ${f.ativo===false?'selected':''}>Inativo</option></select></div>
+
+      ${sec('Financeiro')}
+      ${M('salario','Salário base (R$)')}
+      ${M('encargos','Encargos (R$)')}
+      ${M('beneficios','Benefícios (R$)')}
+      ${M('vale','Vale / adiantamento (R$)')}
+      <div class="field"><label>Dia de pagamento</label><input id="fn_dia_pagamento" type="number" min="1" max="31" value="${f.dia_pagamento||5}"></div>
+
+      ${sec('Pedagógico')}
+      <div class="field"><label>Ciclo que atende</label><select id="fn_ciclo"><option value="">Rateio geral</option>${['Educação Infantil','Fundamental I','Fundamental II','Ensino Médio'].map(s=>`<option ${f.ciclo===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      ${F('disciplinas','Disciplinas')}
+      ${F('turmas','Turmas','text',true)}
+      <div class="field" style="grid-column:1/3"><label>Observações</label><input id="fn_observacao" value="${esc(f.observacao||'')}"></div>
+    </div>`,
+    `${id?`<button class="btn ghost" onclick="delFunc('${id}')" style="margin-right:auto;color:var(--bad)">Excluir</button>`:''}
+     <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveFunc('${id||''}')">Salvar</button>`);
+}
+async function saveFunc(id){
+  const nome=$('fn_nome').value.trim(); if(!nome)return toast('Informe o nome.',true);
+  const v=k=>{const e=$('fn_'+k);return e?(e.value.trim?e.value.trim():e.value)||null:null;};
+  const dt=k=>$('fn_'+k)&&$('fn_'+k).value?$('fn_'+k).value:null;
+  const rec={ nome, cargo:v('cargo'), cpf:v('cpf'), rg:v('rg'), nascimento:dt('nascimento'),
+    telefone:v('telefone'), email:v('email'), cep:v('cep'), logradouro:v('logradouro'), numero:v('numero'),
+    complemento:v('complemento'), bairro:v('bairro'), cidade:v('cidade'), estado:v('estado'),
+    tipo_contrato:$('fn_tipo_contrato').value||null, admissao:dt('admissao'), demissao:dt('demissao'), jornada:v('jornada'),
+    salario:parseMoneyBR(v('salario'))||0, encargos:parseMoneyBR(v('encargos')), beneficios:parseMoneyBR(v('beneficios')), vale:parseMoneyBR(v('vale')),
+    dia_pagamento:+$('fn_dia_pagamento').value||5, ativo:$('fn_ativo').value==='true',
+    ciclo:$('fn_ciclo').value||null, disciplinas:v('disciplinas'), turmas:v('turmas'), observacao:v('observacao') };
+  const q=id?sb.from('funcionarios').update(rec).eq('id',id):sb.from('funcionarios').insert(rec);
+  const {error}=await q; if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderFuncionarios(); toast('Funcionário salvo.');
+}
+async function delFunc(id){ if(!confirm('Excluir este funcionário?'))return;
+  const {error}=await sb.from('funcionarios').delete().eq('id',id); if(error)return toast(error.message,true);
+  closeModal(); await loadAll(); renderFuncionarios(); toast('Funcionário excluído.'); }
 
 /* ---------------- CONFIGURAÇÕES ---------------- */
 function renderConfig(){
